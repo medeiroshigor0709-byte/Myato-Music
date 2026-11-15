@@ -11,11 +11,17 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.core.designsystem.AppFontCatalog
 import com.example.core.designsystem.BuiltInThemes
+import com.example.domain.models.AppFontOption
+import com.example.domain.models.FontApplyTarget
 import com.example.domain.models.HeadsetButtonMapping
 import com.example.domain.models.TrackSortOrder
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.File
 
 private val Context.myatoDataStore: DataStore<Preferences> by preferencesDataStore(name = "myato_preferences")
 
@@ -46,6 +52,12 @@ data class AppUserPreferences(
     val playerShowStats: Boolean = true,
     val playerQueueVisibleCount: Int = 4, // 3..5
     val playerAnimatedTransitions: Boolean = true,
+    val activeFontId: String = AppFontCatalog.DEFAULT_FONT_ID,
+    val activeGeneralFontId: String = AppFontCatalog.DEFAULT_FONT_ID,
+    val activeDecorativeFontId: String = AppFontCatalog.DEFAULT_FONT_ID,
+    val favoriteFontIds: Set<String> = emptySet(),
+    val recentFontIds: List<String> = emptyList(),
+    val customFonts: List<AppFontOption> = emptyList(),
 )
 
 class AppPreferencesStore(private val context: Context) {
@@ -77,9 +89,20 @@ class AppPreferencesStore(private val context: Context) {
         val PLAYER_SHOW_STATS = booleanPreferencesKey("player_show_stats")
         val PLAYER_QUEUE_COUNT = intPreferencesKey("player_queue_count")
         val PLAYER_ANIM_TRANSITIONS = booleanPreferencesKey("player_anim_transitions")
+        val ACTIVE_FONT_ID = stringPreferencesKey("active_font_id")
+        val ACTIVE_GENERAL_FONT_ID = stringPreferencesKey("active_general_font_id")
+        val ACTIVE_DECORATIVE_FONT_ID = stringPreferencesKey("active_decorative_font_id")
+        val FAVORITE_FONT_IDS = stringSetPreferencesKey("favorite_font_ids")
+        val RECENT_FONT_IDS_JSON = stringPreferencesKey("recent_font_ids_json")
+        val CUSTOM_FONTS_JSON = stringPreferencesKey("custom_fonts_json")
     }
 
+    private val json = Json { ignoreUnknownKeys = true }
+
     val preferencesFlow: Flow<AppUserPreferences> = context.myatoDataStore.data.map { prefs ->
+        val legacyFontId = prefs[Keys.ACTIVE_FONT_ID] ?: AppFontCatalog.DEFAULT_FONT_ID
+        val generalId = prefs[Keys.ACTIVE_GENERAL_FONT_ID] ?: legacyFontId
+        val decorativeId = prefs[Keys.ACTIVE_DECORATIVE_FONT_ID] ?: legacyFontId
         AppUserPreferences(
             hasCompletedOnboarding = prefs[Keys.ONBOARDING_DONE] ?: false,
             activeThemeId = prefs[Keys.ACTIVE_THEME_ID] ?: BuiltInThemes.MidnightOrange.id,
@@ -107,7 +130,30 @@ class AppPreferencesStore(private val context: Context) {
             playerShowStats = prefs[Keys.PLAYER_SHOW_STATS] ?: true,
             playerQueueVisibleCount = prefs[Keys.PLAYER_QUEUE_COUNT] ?: 4,
             playerAnimatedTransitions = prefs[Keys.PLAYER_ANIM_TRANSITIONS] ?: true,
+            activeFontId = generalId,
+            activeGeneralFontId = generalId,
+            activeDecorativeFontId = decorativeId,
+            favoriteFontIds = prefs[Keys.FAVORITE_FONT_IDS] ?: emptySet(),
+            recentFontIds = parseStringList(prefs[Keys.RECENT_FONT_IDS_JSON]),
+            customFonts = parseCustomFonts(prefs[Keys.CUSTOM_FONTS_JSON]),
         )
+    }
+
+    private fun parseStringList(raw: String?): List<String> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            json.decodeFromString<List<String>>(raw)
+        }.getOrDefault(emptyList())
+    }
+
+    private fun parseCustomFonts(raw: String?): List<AppFontOption> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            json.decodeFromString<List<AppFontOption>>(raw).filter { font ->
+                val path = font.customFilePath
+                !path.isNullOrBlank() && File(path).let { it.exists() && it.isFile && it.length() > 0L }
+            }
+        }.getOrDefault(emptyList())
     }
 
     private fun parseMapping(raw: String?, fallback: HeadsetButtonMapping): HeadsetButtonMapping {
@@ -229,6 +275,76 @@ class AppPreferencesStore(private val context: Context) {
     suspend fun setPlayerAnimatedTransitions(enabled: Boolean) {
         context.myatoDataStore.edit {
             it[Keys.PLAYER_ANIM_TRANSITIONS] = enabled
+        }
+    }
+
+    suspend fun setActiveFontId(fontId: String) {
+        setFontSelection(fontId, FontApplyTarget.BOTH)
+    }
+
+    suspend fun setFontSelection(fontId: String, target: FontApplyTarget) {
+        context.myatoDataStore.edit { prefs ->
+            when (target) {
+                FontApplyTarget.GENERAL -> {
+                    prefs[Keys.ACTIVE_FONT_ID] = fontId
+                    prefs[Keys.ACTIVE_GENERAL_FONT_ID] = fontId
+                }
+                FontApplyTarget.DECORATIVE -> {
+                    prefs[Keys.ACTIVE_DECORATIVE_FONT_ID] = fontId
+                }
+                FontApplyTarget.BOTH -> {
+                    prefs[Keys.ACTIVE_FONT_ID] = fontId
+                    prefs[Keys.ACTIVE_GENERAL_FONT_ID] = fontId
+                    prefs[Keys.ACTIVE_DECORATIVE_FONT_ID] = fontId
+                }
+            }
+            val currentRecents = parseStringList(prefs[Keys.RECENT_FONT_IDS_JSON]).filterNot { it == fontId }
+            val updatedRecents = (listOf(fontId) + currentRecents).take(10)
+            prefs[Keys.RECENT_FONT_IDS_JSON] = json.encodeToString(updatedRecents)
+        }
+    }
+
+    suspend fun toggleFavoriteFont(fontId: String) {
+        context.myatoDataStore.edit { prefs ->
+            val current = prefs[Keys.FAVORITE_FONT_IDS] ?: emptySet()
+            prefs[Keys.FAVORITE_FONT_IDS] = if (fontId in current) current - fontId else current + fontId
+        }
+    }
+
+    suspend fun resetDefaultFont() {
+        context.myatoDataStore.edit { prefs ->
+            prefs[Keys.ACTIVE_FONT_ID] = AppFontCatalog.DEFAULT_FONT_ID
+            prefs[Keys.ACTIVE_GENERAL_FONT_ID] = AppFontCatalog.DEFAULT_FONT_ID
+            prefs[Keys.ACTIVE_DECORATIVE_FONT_ID] = AppFontCatalog.DEFAULT_FONT_ID
+        }
+    }
+
+    suspend fun addCustomFont(font: AppFontOption) {
+        context.myatoDataStore.edit { prefs ->
+            val current = parseCustomFonts(prefs[Keys.CUSTOM_FONTS_JSON]).filterNot { it.id == font.id }
+            prefs[Keys.CUSTOM_FONTS_JSON] = json.encodeToString(current + font)
+        }
+    }
+
+    suspend fun removeCustomFont(fontId: String) {
+        context.myatoDataStore.edit { prefs ->
+            val updated = parseCustomFonts(prefs[Keys.CUSTOM_FONTS_JSON]).filterNot { it.id == fontId }
+            prefs[Keys.CUSTOM_FONTS_JSON] = json.encodeToString(updated)
+            if (prefs[Keys.ACTIVE_FONT_ID] == fontId) {
+                prefs[Keys.ACTIVE_FONT_ID] = AppFontCatalog.DEFAULT_FONT_ID
+            }
+            if (prefs[Keys.ACTIVE_GENERAL_FONT_ID] == fontId) {
+                prefs[Keys.ACTIVE_GENERAL_FONT_ID] = AppFontCatalog.DEFAULT_FONT_ID
+            }
+            if (prefs[Keys.ACTIVE_DECORATIVE_FONT_ID] == fontId) {
+                prefs[Keys.ACTIVE_DECORATIVE_FONT_ID] = AppFontCatalog.DEFAULT_FONT_ID
+            }
+            val favs = prefs[Keys.FAVORITE_FONT_IDS] ?: emptySet()
+            if (fontId in favs) {
+                prefs[Keys.FAVORITE_FONT_IDS] = favs - fontId
+            }
+            val recents = parseStringList(prefs[Keys.RECENT_FONT_IDS_JSON]).filterNot { it == fontId }
+            prefs[Keys.RECENT_FONT_IDS_JSON] = json.encodeToString(recents)
         }
     }
 }

@@ -37,6 +37,7 @@ import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -86,6 +87,8 @@ fun ThemeCenterScreen(
     onDuplicateTheme: (MyatoTheme, String) -> Unit,
     onDeleteCustomTheme: (String) -> Unit,
     onImportThemeJson: (String) -> Unit,
+    activeFontName: String = "MYATO Original",
+    onOpenFontSettings: () -> Unit = {},
 ) {
     val colors = LocalMyatoColors.current
     var previewTarget by remember { mutableStateOf<MyatoTheme?>(null) }
@@ -104,16 +107,75 @@ fun ThemeCenterScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text("Central de Temas", style = MaterialTheme.typography.headlineMedium, color = colors.textPrimary, fontWeight = FontWeight.Bold)
                 Text("${themes.size} temas disponíveis (pré-visualize antes de aplicar)", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
             }
             Row {
+                IconButton(onClick = onOpenFontSettings, modifier = Modifier.testTag("theme_center_font_icon_button")) {
+                    Icon(Icons.Rounded.TextFields, contentDescription = "Fontes e tipografia", tint = colors.primary)
+                }
                 IconButton(onClick = { showImportDialog = true }) {
                     Icon(Icons.Rounded.FileUpload, contentDescription = "Importar JSON", tint = colors.primary)
                 }
                 IconButton(onClick = { onOpenEditor(activeThemeId) }) {
                     Icon(Icons.Rounded.Edit, contentDescription = "Editor de Temas", tint = colors.primary)
+                }
+            }
+        }
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .clickable(onClick = onOpenFontSettings)
+                .testTag("theme_center_font_card"),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = colors.card),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(colors.primary.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.TextFields, contentDescription = null, tint = colors.primary)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Fontes e tipografia",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = colors.textPrimary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "Tipografia ativa: $activeFontName",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Surface(
+                    shape = CircleShape,
+                    color = colors.primary.copy(alpha = 0.18f),
+                ) {
+                    Text(
+                        text = "Alterar",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.primary,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
                 }
             }
         }

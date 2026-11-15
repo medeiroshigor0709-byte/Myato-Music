@@ -13,6 +13,7 @@ import com.example.core.common.BackupWorker
 import com.example.core.database.AppUserPreferences
 import com.example.core.database.BackupMetadataEntity
 import com.example.core.designsystem.AlbumArtPaletteExtractor
+import com.example.core.designsystem.AppFontCatalog
 import com.example.core.designsystem.BuiltInThemes
 import com.example.core.metadata.LrcLyricsEngine
 import com.example.core.metadata.TagEditPayload
@@ -22,11 +23,14 @@ import com.example.core.storage.FileSystemNode
 import com.example.core.storage.LibraryScanResult
 import com.example.core.storage.MyatoBackupBundle
 import com.example.domain.models.AlbumItem
+import com.example.domain.models.AppFontOption
 import com.example.domain.models.ArtistItem
 import com.example.domain.models.AudioFormatCapability
 import com.example.domain.models.BackupPreview
 import com.example.domain.models.Bookmark
 import com.example.domain.models.FolderItem
+import com.example.domain.models.FontApplyTarget
+import com.example.domain.models.FontImportResult
 import com.example.domain.models.GenreItem
 import com.example.domain.models.HeadsetButtonMapping
 import com.example.domain.models.ListeningStatsSummary
@@ -771,6 +775,60 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             app.preferencesStore.setMonitoredFolders(folders)
             refreshLibrary()
+        }
+    }
+
+    // Typography & Custom Fonts
+    fun selectAppFont(fontId: String) {
+        applyAppFont(fontId, FontApplyTarget.BOTH)
+    }
+
+    fun applyAppFont(fontId: String, target: FontApplyTarget) {
+        viewModelScope.launch {
+            app.preferencesStore.setFontSelection(fontId, target)
+            val option = AppFontCatalog.findFontOption(fontId, preferences.value.customFonts)
+            val label = when (target) {
+                FontApplyTarget.GENERAL -> "Fonte Geral"
+                FontApplyTarget.DECORATIVE -> "Fonte Decorativa"
+                FontApplyTarget.BOTH -> "Fonte Geral e Decorativa"
+            }
+            _statusMessage.value = "$label definida para \"${option.name}\"."
+        }
+    }
+
+    fun toggleFavoriteFont(fontId: String) {
+        viewModelScope.launch {
+            app.preferencesStore.toggleFavoriteFont(fontId)
+        }
+    }
+
+    fun resetDefaultAppFont() {
+        viewModelScope.launch {
+            app.preferencesStore.resetDefaultFont()
+            _statusMessage.value = "Fonte original do MYATO MUSIC restaurada."
+        }
+    }
+
+    fun importCustomFont(uri: Uri, onImported: (AppFontOption) -> Unit = {}) {
+        viewModelScope.launch {
+            when (val res = app.customFontManager.importFontFromUri(uri, preferences.value.customFonts)) {
+                is FontImportResult.Success -> {
+                    app.preferencesStore.addCustomFont(res.font)
+                    _statusMessage.value = "Fonte \"${res.font.name}\" importada! Veja a prévia e aplique quando desejar."
+                    onImported(res.font)
+                }
+                is FontImportResult.Error -> {
+                    _statusMessage.value = res.message
+                }
+            }
+        }
+    }
+
+    fun deleteCustomFont(font: AppFontOption) {
+        viewModelScope.launch {
+            app.customFontManager.deleteCustomFontFile(font)
+            app.preferencesStore.removeCustomFont(font.id)
+            _statusMessage.value = "Fonte personalizada \"${font.name}\" removida."
         }
     }
 

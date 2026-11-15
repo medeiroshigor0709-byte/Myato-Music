@@ -49,6 +49,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.example.core.designsystem.AddToPlaylistsDialog
+import com.example.core.designsystem.AppFontCatalog
 import com.example.core.designsystem.BuiltInThemes
 import com.example.core.designsystem.CreatePlaylistDialog
 import com.example.core.designsystem.DeleteTracksConfirmDialog
@@ -84,6 +85,8 @@ import com.example.feature.statistics.BackupScreen
 import com.example.feature.statistics.SettingsScreen
 import com.example.feature.statistics.StatisticsScreen
 import com.example.feature.statistics.WidgetsShortcutsScreen
+import com.example.feature.themes.FontPreviewScreen
+import com.example.feature.themes.FontSettingsScreen
 import com.example.feature.themes.ThemeCenterScreen
 import com.example.feature.themes.ThemeEditorScreen
 import com.example.presentation.navigation.MyatoRoute
@@ -158,7 +161,27 @@ fun MyatoRootApp(
         }
     }
 
-    MyatoMusicTheme(activeTheme = activeTheme) {
+    val activeGeneralOption = remember(preferences.activeGeneralFontId, preferences.customFonts) {
+        AppFontCatalog.findFontOption(preferences.activeGeneralFontId, preferences.customFonts)
+    }
+    val activeDecorativeOption = remember(preferences.activeDecorativeFontId, preferences.customFonts) {
+        AppFontCatalog.findFontOption(preferences.activeDecorativeFontId, preferences.customFonts)
+    }
+    val activeFontSummary = remember(activeGeneralOption, activeDecorativeOption) {
+        if (activeGeneralOption.id == activeDecorativeOption.id) {
+            activeGeneralOption.name
+        } else {
+            "${activeDecorativeOption.name} + ${activeGeneralOption.name}"
+        }
+    }
+
+    MyatoMusicTheme(
+        activeTheme = activeTheme,
+        activeFontId = preferences.activeGeneralFontId,
+        activeGeneralFontId = preferences.activeGeneralFontId,
+        activeDecorativeFontId = preferences.activeDecorativeFontId,
+        customFonts = preferences.customFonts,
+    ) {
         val colors = LocalMyatoColors.current
         val navBackStack by navController.currentBackStackEntryAsState()
         val currentDestination = navBackStack?.destination
@@ -663,6 +686,49 @@ fun MyatoRootApp(
                                     onDuplicateTheme = { t, name -> viewModel.duplicateTheme(t, name) },
                                     onDeleteCustomTheme = { viewModel.deleteCustomTheme(it) },
                                     onImportThemeJson = { raw -> viewModel.importThemeJson(raw) },
+                                    activeFontName = activeFontSummary,
+                                    onOpenFontSettings = { navController.navigate(MyatoRoute.FontSettings) },
+                                )
+                            }
+
+                            composable<MyatoRoute.FontSettings> {
+                                FontSettingsScreen(
+                                    activeGeneralFontId = preferences.activeGeneralFontId,
+                                    activeDecorativeFontId = preferences.activeDecorativeFontId,
+                                    favoriteFontIds = preferences.favoriteFontIds,
+                                    recentFontIds = preferences.recentFontIds,
+                                    customFonts = preferences.customFonts,
+                                    onBack = { navController.popBackStack() },
+                                    onOpenPreview = { fid -> navController.navigate(MyatoRoute.FontPreview(fid)) },
+                                    onApplyFont = { fid, target -> viewModel.applyAppFont(fid, target) },
+                                    onToggleFavorite = { fid -> viewModel.toggleFavoriteFont(fid) },
+                                    onRestoreDefault = { viewModel.resetDefaultAppFont() },
+                                    onImportCustomFontUri = { uri ->
+                                        viewModel.importCustomFont(uri) { imported ->
+                                            navController.navigate(MyatoRoute.FontPreview(imported.id))
+                                        }
+                                    },
+                                    onDeleteCustomFont = { font -> viewModel.deleteCustomFont(font) },
+                                )
+                            }
+
+                            composable<MyatoRoute.FontPreview> { entry ->
+                                val route = entry.toRoute<MyatoRoute.FontPreview>()
+                                val fontOption = remember(route.fontId, preferences.customFonts) {
+                                    AppFontCatalog.findFontOption(route.fontId, preferences.customFonts)
+                                }
+                                FontPreviewScreen(
+                                    fontOption = fontOption,
+                                    customFonts = preferences.customFonts,
+                                    activeGeneralFontId = preferences.activeGeneralFontId,
+                                    activeDecorativeFontId = preferences.activeDecorativeFontId,
+                                    isFavorite = fontOption.id in preferences.favoriteFontIds,
+                                    onToggleFavorite = { viewModel.toggleFavoriteFont(fontOption.id) },
+                                    onApplyFont = { target -> viewModel.applyAppFont(fontOption.id, target) },
+                                    onDeleteCustomFont = if (fontOption.isCustom) {
+                                        { viewModel.deleteCustomFont(fontOption) }
+                                    } else null,
+                                    onBack = { navController.popBackStack() },
                                 )
                             }
 
@@ -716,6 +782,8 @@ fun MyatoRootApp(
                                     onOpenBackup = { navController.navigate(MyatoRoute.Backup) },
                                     onOpenWidgets = { navController.navigate(MyatoRoute.WidgetsShortcuts) },
                                     onOpenAbout = { navController.navigate(MyatoRoute.About) },
+                                    activeFontName = activeFontSummary,
+                                    onOpenFontSettings = { navController.navigate(MyatoRoute.FontSettings) },
                                 )
                             }
 

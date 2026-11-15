@@ -9,11 +9,13 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 import com.example.domain.models.AnimationMode
+import com.example.domain.models.AppFontOption
 import com.example.domain.models.ButtonStyle
 import com.example.domain.models.CoverShape
 import com.example.domain.models.MyatoTheme
@@ -86,10 +88,21 @@ private val MyatoShapes = Shapes(
 @Composable
 fun MyatoMusicTheme(
     activeTheme: MyatoTheme = BuiltInThemes.MidnightOrange,
+    activeFontId: String = AppFontCatalog.DEFAULT_FONT_ID,
+    activeGeneralFontId: String = activeFontId,
+    activeDecorativeFontId: String = activeFontId,
+    customFonts: List<AppFontOption> = emptyList(),
     content: @Composable () -> Unit,
 ) {
     val extended = activeTheme.toExtendedColors()
     val onPrimaryColor = if (extended.isLight) Color.White else Color.Black
+    val resolvedTypography = remember(activeGeneralFontId, activeDecorativeFontId, customFonts) {
+        AppFontCatalog.resolveDualTypography(
+            generalFontId = activeGeneralFontId,
+            decorativeFontId = activeDecorativeFontId,
+            customFonts = customFonts,
+        )
+    }
 
     val colorScheme = if (extended.isLight) {
         lightColorScheme(
@@ -130,7 +143,7 @@ fun MyatoMusicTheme(
     CompositionLocalProvider(LocalMyatoColors provides extended) {
         MaterialTheme(
             colorScheme = colorScheme,
-            typography = MyatoTypography,
+            typography = resolvedTypography,
             shapes = MyatoShapes,
             content = content,
         )

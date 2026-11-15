@@ -459,6 +459,8 @@ fun SettingsScreen(
     onOpenBackup: () -> Unit,
     onOpenWidgets: () -> Unit,
     onOpenAbout: () -> Unit,
+    activeFontName: String = "MYATO Original",
+    onOpenFontSettings: () -> Unit = {},
 ) {
     val colors = LocalMyatoColors.current
     var showFormatsDialog by remember { mutableStateOf(false) }
@@ -509,7 +511,13 @@ fun SettingsScreen(
         }
 
         Spacer(Modifier.height(12.dp))
-        SettingActionRow("Formatos de Áudio Compatíveis neste Aparelho", "Ver decodificadores reais (MP3, FLAC, OPUS, DSF...)") { showFormatsDialog = true }
+        SettingActionRow(
+            title = "Fontes e tipografia",
+            subtitle = "Catálogo de fontes • Ativa: $activeFontName",
+            onClick = onOpenFontSettings,
+            modifier = Modifier.testTag("settings_font_row"),
+        )
+        SettingActionRow("Formatos de Áudio Compatíveis neste Aparelho", "Ver decodificadores reais (MP3, FLAC, OPUS, DSF...)", { showFormatsDialog = true })
         SettingActionRow("Permissões e Pastas SAF", "Gerenciar acesso ao armazenamento local", onOpenPermissions)
         SettingActionRow("Backup e Restauração", "Exportar/importar JSON e agendar backup", onOpenBackup)
         SettingActionRow("Widgets e Atalhos", "Configurar widgets e fixar atalhos", onOpenWidgets)
@@ -603,10 +611,15 @@ private fun SettingToggleCard(title: String, subtitle: String, checked: Boolean,
 }
 
 @Composable
-private fun SettingActionRow(title: String, subtitle: String, onClick: () -> Unit) {
+private fun SettingActionRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = LocalMyatoColors.current
     Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable(onClick = onClick),
+        modifier = modifier.fillMaxWidth().padding(vertical = 4.dp).clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = colors.card),
     ) {

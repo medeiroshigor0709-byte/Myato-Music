@@ -6,6 +6,7 @@ import com.example.core.database.AppPreferencesStore
 import com.example.core.database.MyatoDatabase
 import com.example.core.metadata.TagEditorEngine
 import com.example.core.storage.BackupManager
+import com.example.core.storage.CustomFontManager
 import com.example.core.storage.FileManagerRepository
 import com.example.core.storage.MediaStoreScanner
 import com.example.data.repository.LibraryRepository
@@ -22,6 +23,7 @@ class MyatoApplication : Application() {
     val fileManagerRepository: FileManagerRepository by lazy { FileManagerRepository(this, database) }
     val tagEditorEngine: TagEditorEngine by lazy { TagEditorEngine(this, database) }
     val backupManager: BackupManager by lazy { BackupManager(this, database, preferencesStore) }
+    val customFontManager: CustomFontManager by lazy { CustomFontManager(this) }
 
     val libraryRepository: LibraryRepository by lazy {
         LibraryRepository(database, mediaStoreScanner, preferencesStore)

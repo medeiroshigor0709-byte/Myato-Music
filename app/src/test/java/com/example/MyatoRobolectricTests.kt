@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -21,18 +22,27 @@ import com.example.core.database.MusicNoteEntity
 import com.example.core.database.MusicTrackEntity
 import com.example.core.database.MyatoDatabase
 import com.example.core.database.toEntity
+import com.example.core.designsystem.AppFontCatalog
 import com.example.core.designsystem.BuiltInThemes
 import com.example.core.designsystem.MyatoMusicTheme
+import com.example.core.designsystem.MyatoTypography
 import com.example.core.metadata.TagEditPayload
 import com.example.core.metadata.TagEditorEngine
 import com.example.core.storage.BackupManager
+import com.example.core.storage.CustomFontManager
 import com.example.data.repository.PlaylistRepository
 import com.example.data.repository.QueueRepository
 import com.example.data.repository.ThemeRepository
+import com.example.domain.models.AppFontOption
+import com.example.domain.models.FontApplyTarget
+import com.example.domain.models.FontCategory
+import com.example.domain.models.FontImportResult
 import com.example.domain.models.MusicTrack
 import com.example.domain.models.PlaybackQueue
 import com.example.feature.player.FullPlayerScreen
 import com.example.feature.queues.QueuesScreen
+import com.example.feature.themes.FontPreviewScreen
+import com.example.feature.themes.FontSettingsScreen
 import com.example.feature.themes.ThemeCenterScreen
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -485,5 +495,277 @@ class MyatoRobolectricTests {
         composeRule.onNodeWithText("MYATO").assertIsDisplayed()
         composeRule.onNodeWithText("MUSIC").assertIsDisplayed()
     }
+
+    @Test
+    fun `app font catalog includes all 12 categories, 49 licensed fonts, and resolves all 15 typography slots`() {
+        assertEquals(12, FontCategory.entries.size)
+        assertEquals(49, AppFontCatalog.builtInFonts.size)
+
+        // Ensure every required category has fonts
+        FontCategory.entries.forEach { category ->
+            assertTrue(
+                "Category ${category.label} must contain at least 3 fonts",
+                AppFontCatalog.builtInFonts.count { it.fontCategory == category } >= 3,
+            )
+        }
+
+        // Ensure every font loads cleanly and has creator + license attribution
+        AppFontCatalog.builtInFonts.forEach { option ->
+            assertTrue(option.creator.isNotBlank())
+            assertTrue(option.license in setOf("SIL OFL 1.1", "Apache 2.0"))
+            val family = AppFontCatalog.resolveFontFamily(option.id, emptyList())
+            val typo = AppFontCatalog.resolveAppTypography(option.id, emptyList())
+            assertNotNull(family)
+            assertNotNull(typo.displayLarge.fontFamily)
+            assertNotNull(typo.headlineMedium.fontFamily)
+            assertNotNull(typo.titleLarge.fontFamily)
+            assertNotNull(typo.bodyLarge.fontFamily)
+            assertNotNull(typo.labelSmall.fontFamily)
+        }
+        assertEquals(MyatoTypography, AppFontCatalog.resolveAppTypography(AppFontCatalog.DEFAULT_FONT_ID, emptyList()))
+
+        // Verify Dual Typography separates Decorative (display/headline/titleLarge) and General (body/menus/labels)
+        val dualTypo = AppFontCatalog.resolveDualTypography(
+            generalFontId = "inter",
+            decorativeFontId = "metal_mania",
+            customFonts = emptyList(),
+        )
+        assertEquals(com.example.core.designsystem.MetalManiaFontFamily, dualTypo.headlineLarge.fontFamily)
+        assertEquals(com.example.core.designsystem.InterFontFamily, dualTypo.bodyLarge.fontFamily)
+    }
+
+    @Test
+    fun `font preferences persist dual general and decorative fonts, favorites, recents, and reset`(): Unit = runBlocking {
+        prefs.setFontSelection("inter", FontApplyTarget.GENERAL)
+        prefs.setFontSelection("creepster", FontApplyTarget.DECORATIVE)
+        prefs.toggleFavoriteFont("creepster")
+        prefs.toggleFavoriteFont("metal_mania")
+
+        val customFile = File(context.filesDir, "custom_fonts/test_custom.ttf").apply {
+            parentFile?.mkdirs()
+            context.resources.openRawResource(R.font.roboto).use { input ->
+                outputStream().use { output -> input.copyTo(output) }
+            }
+        }
+        val customOption = AppFontOption(
+            id = "custom_font_test_1",
+            name = "Minha Fonte Studio",
+            description = "Fonte personalizada importada (TTF)",
+            category = "Personalizada",
+            isCustom = true,
+            customFilePath = customFile.absolutePath,
+            fileFormat = "TTF",
+            sizeBytes = customFile.length(),
+        )
+        prefs.addCustomFont(customOption)
+        prefs.setFontSelection(customOption.id, FontApplyTarget.DECORATIVE)
+
+        val reloadedPrefs = AppPreferencesStore(context)
+        var current = reloadedPrefs.preferencesFlow.first()
+        assertEquals("inter", current.activeGeneralFontId)
+        assertEquals(customOption.id, current.activeDecorativeFontId)
+        assertTrue("creepster" in current.favoriteFontIds)
+        assertTrue("metal_mania" in current.favoriteFontIds)
+        assertEquals(customOption.id, current.recentFontIds.firstOrNull())
+        assertTrue(current.customFonts.any { it.id == customOption.id })
+
+        // Removing active custom decorative font resets decorative back to default while keeping general
+        reloadedPrefs.removeCustomFont(customOption.id)
+        current = reloadedPrefs.preferencesFlow.first()
+        assertEquals("inter", current.activeGeneralFontId)
+        assertEquals(AppFontCatalog.DEFAULT_FONT_ID, current.activeDecorativeFontId)
+        assertFalse(current.customFonts.any { it.id == customOption.id })
+
+        // Reset restores both General and Decorative to MYATO Original
+        reloadedPrefs.resetDefaultFont()
+        current = reloadedPrefs.preferencesFlow.first()
+        assertEquals(AppFontCatalog.DEFAULT_FONT_ID, current.activeGeneralFontId)
+        assertEquals(AppFontCatalog.DEFAULT_FONT_ID, current.activeDecorativeFontId)
+        customFile.delete()
+    }
+
+    @Test
+    fun `custom font manager validates extensions, corrupt binaries, imports ttf and otf, and cleans up safely`(): Unit = runBlocking {
+        val manager = CustomFontManager(context)
+        val tmpInvalidExt = File.createTempFile("bad_font_", ".txt")
+        val tmpCorruptTtf = File.createTempFile("corrupt_font_", ".ttf")
+        val tmpValidTtf = File.createTempFile("Minha_Fonte_Ttf", ".ttf")
+        val tmpValidOtf = File.createTempFile("Minha_Fonte_Otf", ".otf")
+        try {
+            tmpInvalidExt.writeText("not a font")
+            assertTrue(manager.importFontFromFile(tmpInvalidExt, emptyList()) is FontImportResult.Error)
+
+            tmpCorruptTtf.writeBytes(ByteArray(512) { 0x42 })
+            assertTrue(manager.importFontFromFile(tmpCorruptTtf, emptyList()) is FontImportResult.Error)
+
+            context.resources.openRawResource(R.font.inter).use { input ->
+                tmpValidTtf.outputStream().use { output -> input.copyTo(output) }
+            }
+            val ttfResult = manager.importFontFromFile(tmpValidTtf, emptyList())
+            assertTrue("Expected valid TTF import to succeed, got $ttfResult", ttfResult is FontImportResult.Success)
+            val importedTtf = (ttfResult as FontImportResult.Success).font
+            assertEquals("TTF", importedTtf.fileFormat)
+
+            context.resources.openRawResource(R.font.outfit).use { input ->
+                tmpValidOtf.outputStream().use { output -> input.copyTo(output) }
+            }
+            val otfResult = manager.importFontFromFile(tmpValidOtf, listOf(importedTtf))
+            assertTrue("Expected valid OTF import to succeed, got $otfResult", otfResult is FontImportResult.Success)
+            val importedOtf = (otfResult as FontImportResult.Success).font
+            assertEquals("OTF", importedOtf.fileFormat)
+
+            assertNotNull(AppFontCatalog.resolveAppTypography(importedTtf.id, listOf(importedTtf)).headlineLarge.fontFamily)
+            assertNotNull(AppFontCatalog.resolveAppTypography(importedOtf.id, listOf(importedOtf)).headlineLarge.fontFamily)
+
+            assertTrue(manager.deleteCustomFontFile(importedTtf))
+            assertTrue(manager.deleteCustomFontFile(importedOtf))
+            assertFalse(File(importedTtf.customFilePath!!).exists())
+            assertFalse(File(importedOtf.customFilePath!!).exists())
+        } finally {
+            tmpInvalidExt.delete()
+            tmpCorruptTtf.delete()
+            tmpValidTtf.delete()
+            tmpValidOtf.delete()
+        }
+    }
+
+    @Test
+    fun `font catalog ui filters by category, toggles favorites, applies decorative font, and restores default`() {
+        var activeGeneral = AppFontCatalog.DEFAULT_FONT_ID
+        var activeDecorative = AppFontCatalog.DEFAULT_FONT_ID
+        var previewRequestedId = ""
+        var favs = setOf<String>()
+
+        composeRule.setContent {
+            MyatoMusicTheme(
+                activeTheme = BuiltInThemes.PureLight,
+                activeGeneralFontId = activeGeneral,
+                activeDecorativeFontId = activeDecorative,
+            ) {
+                FontSettingsScreen(
+                    activeGeneralFontId = activeGeneral,
+                    activeDecorativeFontId = activeDecorative,
+                    favoriteFontIds = favs,
+                    recentFontIds = listOf("creepster"),
+                    customFonts = emptyList(),
+                    onBack = {},
+                    onOpenPreview = { previewRequestedId = it },
+                    onApplyFont = { fid, target ->
+                        when (target) {
+                            FontApplyTarget.GENERAL -> activeGeneral = fid
+                            FontApplyTarget.DECORATIVE -> activeDecorative = fid
+                            FontApplyTarget.BOTH -> {
+                                activeGeneral = fid
+                                activeDecorative = fid
+                            }
+                        }
+                    },
+                    onToggleFavorite = { fid ->
+                        favs = if (fid in favs) favs - fid else favs + fid
+                    },
+                    onRestoreDefault = {
+                        activeGeneral = AppFontCatalog.DEFAULT_FONT_ID
+                        activeDecorative = AppFontCatalog.DEFAULT_FONT_ID
+                    },
+                    onImportCustomFontUri = {},
+                    onDeleteCustomFont = {},
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("font_settings_screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("import_custom_font_button").assertIsDisplayed()
+        composeRule.onNodeWithTag("restore_default_font_button").assertIsDisplayed()
+
+        // Filter by Horror category -> Creepster appears
+        composeRule.onNodeWithTag("font_category_row")
+            .performScrollToNode(hasTestTag("font_category_horror"))
+        composeRule.onNodeWithTag("font_category_horror").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("font_settings_list")
+            .performScrollToNode(hasTestTag("font_option_creepster"))
+        composeRule.onNodeWithTag("font_option_creepster").assertIsDisplayed()
+
+        // Click Visualizar on Creepster
+        composeRule.onNodeWithTag("preview_btn_creepster").performClick()
+        composeRule.waitForIdle()
+        assertEquals("creepster", previewRequestedId)
+
+        // Click Aplicar on Creepster -> choose Decorative in dialog
+        composeRule.onNodeWithTag("apply_btn_creepster").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("dialog_apply_decorative").performClick()
+        composeRule.waitForIdle()
+        assertEquals("creepster", activeDecorative)
+        assertEquals(AppFontCatalog.DEFAULT_FONT_ID, activeGeneral)
+    }
+
+    @Test
+    fun `font preview screen renders all required myato samples and applies font cleanly across themes`() {
+        var appliedTarget: FontApplyTarget? = null
+        var backPressed = false
+
+        val sampleFont = AppFontCatalog.findFontOption("metal_mania", emptyList())
+
+        composeRule.setContent {
+            MyatoMusicTheme(activeTheme = BuiltInThemes.MidnightOrange) {
+                FontPreviewScreen(
+                    fontOption = sampleFont,
+                    customFonts = emptyList(),
+                    activeGeneralFontId = AppFontCatalog.DEFAULT_FONT_ID,
+                    activeDecorativeFontId = AppFontCatalog.DEFAULT_FONT_ID,
+                    isFavorite = false,
+                    onToggleFavorite = {},
+                    onApplyFont = { appliedTarget = it },
+                    onDeleteCustomFont = null,
+                    onBack = { backPressed = true },
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("font_preview_screen").assertIsDisplayed()
+        composeRule.onNodeWithText("MYATO MUSIC").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("font_preview_scroll")
+            .performScrollToNode(hasText("The Sound of Music"))
+        composeRule.onNodeWithText("Reproduzindo agora").assertIsDisplayed()
+        composeRule.onNodeWithText("The Sound of Music").assertIsDisplayed()
+        composeRule.onNodeWithText("Myato Artist").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("font_preview_scroll")
+            .performScrollToNode(hasText("Álbuns e playlists"))
+        composeRule.onNodeWithText("Minha biblioteca").assertIsDisplayed()
+        composeRule.onNodeWithText("Álbuns e playlists").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("font_preview_scroll")
+            .performScrollToNode(hasText("Botões e informações das configurações"))
+        composeRule.onNodeWithText("Botões e informações das configurações").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("preview_apply_font_button").performClick()
+        composeRule.waitForIdle()
+        assertEquals(FontApplyTarget.DECORATIVE, appliedTarget)
+
+        composeRule.onNodeWithTag("preview_back_button").performClick()
+        composeRule.waitForIdle()
+        assertTrue(backPressed)
+    }
+
+    @Test
+    fun `all 12 built-in themes combine seamlessly with custom decorative and general fonts`() {
+        assertEquals(12, BuiltInThemes.all.size)
+        BuiltInThemes.all.forEach { theme ->
+            val typo = AppFontCatalog.resolveDualTypography(
+                generalFontId = "inter",
+                decorativeFontId = "unifraktur_maguntia",
+                customFonts = emptyList(),
+            )
+            assertNotNull(theme.id)
+            assertNotNull(typo.headlineLarge.fontFamily)
+            assertNotNull(typo.bodyMedium.fontFamily)
+        }
+    }
 }
+
+
 

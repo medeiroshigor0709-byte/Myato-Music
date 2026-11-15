@@ -315,7 +315,9 @@ fun CompactTrackRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = track.title,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontFamily = MaterialTheme.typography.titleLarge.fontFamily,
+                ),
                 color = if (isCurrent) colors.primary else colors.textPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -417,7 +419,9 @@ fun MiniPlayerBar(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = track.title,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontFamily = MaterialTheme.typography.titleLarge.fontFamily,
+                        ),
                         color = colors.textPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
