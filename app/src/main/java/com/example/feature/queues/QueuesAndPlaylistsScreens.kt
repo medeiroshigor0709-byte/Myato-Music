@@ -90,7 +90,9 @@ import com.example.core.audio.PlaybackUiState
 import com.example.core.common.TimeFormatter
 import com.example.core.designsystem.AlbumArtwork
 import com.example.core.designsystem.CreatePlaylistDialog
+import androidx.compose.animation.animateContentSize
 import com.example.core.designsystem.LocalMyatoColors
+import com.example.core.designsystem.StaggeredEntryContainer
 import com.example.domain.models.MusicTrack
 import com.example.domain.models.PlaybackQueue
 import com.example.domain.models.Playlist
@@ -492,20 +494,26 @@ fun PlaylistsScreen(
             }
 
             LazyColumn(contentPadding = PaddingValues(bottom = 140.dp)) {
-                items(displayedPlaylists, key = { it.id }) { playlist ->
+                itemsIndexed(
+                    items = displayedPlaylists,
+                    key = { _, p -> p.id },
+                    contentType = { _, _ -> "playlist_card" },
+                ) { index, playlist ->
                     var showCardMenu by remember { mutableStateOf(false) }
 
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp)
-                            .clickable {
-                                selectedTrackIdsInPlaylist.clear()
-                                selectedPlaylist = playlist
-                            },
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(containerColor = colors.card),
-                    ) {
+                    StaggeredEntryContainer(index = index) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .animateContentSize()
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                                .clickable {
+                                    selectedTrackIdsInPlaylist.clear()
+                                    selectedPlaylist = playlist
+                                },
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(containerColor = colors.card),
+                        ) {
                         Row(
                             modifier = Modifier.padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -613,6 +621,7 @@ fun PlaylistsScreen(
                                 }
                             }
                         }
+                    }
                     }
                 }
             }

@@ -1,7 +1,10 @@
 package com.example
 
 import android.app.Application
-import com.example.core.audio.PlaybackControllerHolder
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.example.core.database.AppPreferencesStore
 import com.example.core.database.MyatoDatabase
 import com.example.core.metadata.TagEditorEngine
@@ -14,8 +17,9 @@ import com.example.data.repository.PlaylistRepository
 import com.example.data.repository.QueueRepository
 import com.example.data.repository.StatsAndEngagementRepository
 import com.example.data.repository.ThemeRepository
+import java.io.File
 
-class MyatoApplication : Application() {
+class MyatoApplication : Application(), ImageLoaderFactory {
 
     val database: MyatoDatabase by lazy { MyatoDatabase.getInstance(this) }
     val preferencesStore: AppPreferencesStore by lazy { AppPreferencesStore(this) }
@@ -43,7 +47,25 @@ class MyatoApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Pre-warm database; PlaybackController connects when UI or widget invokes it
+        // Pre-warm database lazily; PlaybackController connects when UI or widget invokes it
         database
     }
+
+    override fun newImageLoader(): ImageLoader {
+        return ImageLoader.Builder(this)
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.18)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(File(cacheDir, "myato_art_cache"))
+                    .maxSizeBytes(40L * 1024L * 1024L)
+                    .build()
+            }
+            .respectCacheHeaders(false)
+            .build()
+    }
 }
+

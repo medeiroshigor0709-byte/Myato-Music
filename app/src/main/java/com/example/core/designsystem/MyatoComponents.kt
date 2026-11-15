@@ -1,11 +1,13 @@
 package com.example.core.designsystem
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -97,6 +99,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -136,8 +139,10 @@ fun AlbumArtwork(
     small: Boolean = true,
 ) {
     val colors = LocalMyatoColors.current
+    val motion = LocalMotionSettings.current
     val shape = if (small) colors.resolveSmallCoverShape() else colors.resolveCoverShape()
     val context = LocalContext.current
+    val sizePx = with(LocalDensity.current) { size.roundToPx().coerceAtLeast(48) }
 
     Box(
         modifier = modifier
@@ -151,7 +156,8 @@ fun AlbumArtwork(
             AsyncImage(
                 model = ImageRequest.Builder(context)
                     .data(artUri)
-                    .crossfade(colors.animationMode != AnimationMode.BATTERY_SAVER)
+                    .size(sizePx)
+                    .crossfade(colors.animationMode != AnimationMode.BATTERY_SAVER && motion.isAnimationsActive)
                     .error(R.drawable.img_default_album_art)
                     .placeholder(R.drawable.img_default_album_art)
                     .build(),
@@ -262,11 +268,17 @@ fun CompactTrackRow(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalMyatoColors.current
-    val bg = when {
+    val motion = LocalMotionSettings.current
+    val targetBg = when {
         isSelected -> colors.primary.copy(alpha = 0.16f)
         isCurrent -> colors.primary.copy(alpha = 0.10f)
         else -> Color.Transparent
     }
+    val bg by animateColorAsState(
+        targetValue = targetBg,
+        animationSpec = tween(durationMillis = if (motion.isAnimationsActive) 180 else 0),
+        label = "track_row_bg",
+    )
 
     Row(
         modifier = modifier
@@ -434,18 +446,21 @@ fun MiniPlayerBar(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                val playInteraction = remember { MutableInteractionSource() }
                 IconButton(
                     onClick = onPlayPause,
+                    interactionSource = playInteraction,
                     modifier = Modifier
                         .size(48.dp)
+                        .pressScaleFeedback(playInteraction, pressedScale = 0.92f)
                         .testTag("mini_player_play_pause")
                         .clip(CircleShape)
                         .background(colors.primary),
                 ) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = stringResource(R.string.cd_play_pause),
+                    AnimatedPlayPauseIcon(
+                        isPlaying = isPlaying,
                         tint = if (colors.isLight) Color.White else Color.Black,
+                        iconSize = 24.dp,
                     )
                 }
                 IconButton(

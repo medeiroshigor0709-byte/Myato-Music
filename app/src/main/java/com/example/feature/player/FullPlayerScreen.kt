@@ -1,6 +1,5 @@
 package com.example.feature.player
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -12,6 +11,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -94,16 +94,19 @@ import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.core.audio.PlaybackUiState
 import com.example.core.common.TimeFormatter
-import com.example.core.designsystem.AlbumArtPaletteExtractor
 import com.example.core.designsystem.AlbumArtwork
-import com.example.core.designsystem.BuiltInThemes
+import com.example.core.designsystem.AnimatedFavoriteIconButton
+import com.example.core.designsystem.AnimatedPlayPauseIcon
+import com.example.core.designsystem.LocalMotionSettings
 import com.example.core.designsystem.LocalMyatoColors
+import com.example.core.designsystem.pressScaleFeedback
 import com.example.domain.models.AnimationMode
 import com.example.domain.models.Bookmark
 import com.example.domain.models.ListeningStatsSummary
 import com.example.domain.models.MusicNote
 import com.example.domain.models.MusicTrack
 import com.example.domain.models.PlayerAppearance
+import com.example.domain.models.PlayerVisualBackgroundStyle
 import com.example.domain.models.RepeatMode as MyatoRepeatMode
 
 /**
@@ -132,6 +135,11 @@ fun FullPlayerScreen(
     showStatsEnabled: Boolean = true,
     queueVisibleCount: Int = 4,
     animatedTransitions: Boolean = true,
+    hasRealFftSignal: Boolean = false,
+    playerVisualStyle: PlayerVisualBackgroundStyle = PlayerVisualBackgroundStyle.AUDIO_SPECTRUM,
+    animationsDisabled: Boolean = false,
+    reduceMotion: Boolean = false,
+    reduceEffectsOnLowBattery: Boolean = true,
     onClose: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -165,9 +173,14 @@ fun FullPlayerScreen(
     onSetShowStatsEnabled: (Boolean) -> Unit = {},
     onSetQueueCount: (Int) -> Unit = {},
     onSetAnimatedTransitions: (Boolean) -> Unit = {},
+    onSetPlayerVisualStyle: (PlayerVisualBackgroundStyle) -> Unit = {},
+    onSetAnimationsDisabled: (Boolean) -> Unit = {},
+    onSetReduceMotion: (Boolean) -> Unit = {},
+    onSetReduceEffectsOnLowBattery: (Boolean) -> Unit = {},
 ) {
     val colors = LocalMyatoColors.current
-    val context = LocalContext.current
+    val motion = LocalMotionSettings.current
+    val scrollState = rememberScrollState()
     val track = playbackState.currentTrack
     var isSeeking by remember { mutableStateOf(false) }
     var sliderDragPos by remember { mutableFloatStateOf(0f) }
@@ -181,75 +194,62 @@ fun FullPlayerScreen(
     }
 
     val coverScale by animateFloatAsState(
-        targetValue = if (playbackState.isPlaying) 1f else 0.92f,
+        targetValue = if (!motion.isAnimationsActive || motion.isReducedMotionActive) 1f else if (playbackState.isPlaying) 1f else 0.94f,
         animationSpec = spring(),
         label = "cover_scale",
     )
 
-    val spinTransition = rememberInfiniteTransition(label = "vinyl_spin")
-    val spinAngle by spinTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(14000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "vinyl_angle",
-    )
+    val shouldSpinVinyl = colors.playerAppearance == PlayerAppearance.VINYL_DISC &&
+        playbackState.isPlaying &&
+        motion.isAnimationsActive &&
+        !motion.isReducedMotionActive &&
+        colors.animationMode != AnimationMode.BATTERY_SAVER
 
-    // Dynamic ambient lighting extracted from album artwork
-    var ambientAccentColor by remember { mutableStateOf(colors.primary) }
-
-    LaunchedEffect(track?.id, ambientBgEnabled) {
-        if (ambientBgEnabled && track != null) {
-            val extracted = AlbumArtPaletteExtractor.extractThemeFromTrack(
-                context = context,
-                artUri = track.albumArtUri,
-                filePath = track.filePath,
-                baseTheme = BuiltInThemes.MidnightOrange,
-            )
-            ambientAccentColor = Color(extracted.primaryColorHex)
-        } else {
-            ambientAccentColor = colors.primary
-        }
-    }
-
-    val animatedAccent by animateColorAsState(
-        targetValue = ambientAccentColor,
-        animationSpec = tween(durationMillis = if (animatedTransitions) 600 else 0),
-        label = "ambient_accent",
-    )
+    val spinAngle = if (shouldSpinVinyl) {
+        val spinTransition = rememberInfiniteTransition(label = "vinyl_spin")
+        spinTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(14000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "vinyl_angle",
+        ).value
+    } else 0f
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        animatedAccent.copy(alpha = 0.22f),
-                        colors.altBackground,
-                        colors.background,
-                    ),
-                ),
-            )
-            .safeDrawingPadding()
+            .background(colors.background)
             .testTag("full_player_screen"),
         contentAlignment = Alignment.TopCenter,
     ) {
-        // Optional subtle floating sparkles
-        if (particlesEnabled) {
+        PlayerAnimatedBackground(
+            track = track,
+            isPlaying = playbackState.isPlaying,
+            spectrumBars = spectrumBars,
+            hasRealFftSignal = hasRealFftSignal,
+            ambientBgEnabled = ambientBgEnabled,
+            scrollOffsetPx = scrollState.value.toFloat(),
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // Optional subtle floating sparkles (suspended when paused, reduced motion, or disabled)
+        if (particlesEnabled && motion.isAnimationsActive && !motion.isReducedMotionActive && playbackState.isPlaying) {
             FloatingAmbientParticles(
                 isPlaying = playbackState.isPlaying,
-                particleColor = animatedAccent,
+                particleColor = colors.primary,
                 modifier = Modifier.fillMaxSize(),
             )
         }
 
         Column(
             modifier = Modifier
+                .safeDrawingPadding()
                 .widthIn(max = 600.dp)
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -274,7 +274,9 @@ fun FullPlayerScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
                         onClick = { showPlayerSettingsSheet = true },
-                        modifier = Modifier.minimumInteractiveComponentSize(),
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("player_settings_button"),
                     ) {
                         Icon(Icons.Rounded.Tune, contentDescription = "Ajustes do Player", tint = colors.textSecondary)
                     }
@@ -330,18 +332,11 @@ fun FullPlayerScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                IconButton(
+                AnimatedFavoriteIconButton(
+                    isFavorite = track?.isFavorite == true,
                     onClick = onToggleFavorite,
-                    modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .testTag("player_favorite_button"),
-                ) {
-                    Icon(
-                        imageVector = if (track?.isFavorite == true) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        contentDescription = stringResource(R.string.cd_favorite),
-                        tint = if (track?.isFavorite == true) colors.primary else colors.textSecondary,
-                    )
-                }
+                    modifier = Modifier.testTag("player_favorite_button"),
+                )
             }
 
             playbackState.errorMessage?.let { err ->
@@ -424,19 +419,21 @@ fun FullPlayerScreen(
                 IconButton(onClick = onPrevious, modifier = Modifier.size(52.dp).testTag("player_prev_button")) {
                     Icon(Icons.Rounded.SkipPrevious, contentDescription = stringResource(R.string.cd_prev_track), tint = colors.textPrimary, modifier = Modifier.size(34.dp))
                 }
+                val playInteraction = remember { MutableInteractionSource() }
                 IconButton(
                     onClick = onPlayPause,
+                    interactionSource = playInteraction,
                     modifier = Modifier
                         .size(72.dp)
+                        .pressScaleFeedback(playInteraction, pressedScale = 0.92f)
                         .testTag("player_play_pause_button")
                         .clip(colors.resolveButtonShape())
                         .background(colors.primary),
                 ) {
-                    Icon(
-                        imageVector = if (playbackState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = stringResource(R.string.cd_play_pause),
+                    AnimatedPlayPauseIcon(
+                        isPlaying = playbackState.isPlaying,
                         tint = if (colors.isLight) Color.White else Color.Black,
-                        modifier = Modifier.size(38.dp),
+                        iconSize = 38.dp,
                     )
                 }
                 IconButton(onClick = onNext, modifier = Modifier.size(52.dp).testTag("player_next_button")) {
@@ -645,6 +642,10 @@ fun FullPlayerScreen(
             showStatsEnabled = showStatsEnabled,
             queueCount = queueVisibleCount,
             animatedTransitions = animatedTransitions,
+            playerVisualStyle = playerVisualStyle,
+            animationsDisabled = animationsDisabled,
+            reduceMotion = reduceMotion,
+            reduceEffectsOnLowBattery = reduceEffectsOnLowBattery,
             onDismiss = { showPlayerSettingsSheet = false },
             onSetVisualizerEnabled = onSetVisualizerEnabled,
             onSetVisualizerStyle = onSetVisualizerStyle,
@@ -654,6 +655,10 @@ fun FullPlayerScreen(
             onSetShowStatsEnabled = onSetShowStatsEnabled,
             onSetQueueCount = onSetQueueCount,
             onSetAnimatedTransitions = onSetAnimatedTransitions,
+            onSetPlayerVisualStyle = onSetPlayerVisualStyle,
+            onSetAnimationsDisabled = onSetAnimationsDisabled,
+            onSetReduceMotion = onSetReduceMotion,
+            onSetReduceEffectsOnLowBattery = onSetReduceEffectsOnLowBattery,
         )
     }
 }

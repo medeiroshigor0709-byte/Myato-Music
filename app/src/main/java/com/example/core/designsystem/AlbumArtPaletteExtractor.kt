@@ -5,15 +5,88 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.util.LruCache
+import androidx.compose.ui.graphics.Color
 import androidx.palette.graphics.Palette
+import com.example.domain.models.ExtractedArtPalette
 import com.example.domain.models.MyatoTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Generates an offline MyatoTheme palette directly from the current track's embedded or MediaStore album art.
+ * Generates an offline MyatoTheme palette or multi-swatch aurora palette directly from the current
+ * track's embedded or MediaStore album art, using bounded downsampling and LRU caching for 60fps UI.
  */
 object AlbumArtPaletteExtractor {
+
+    private val auroraCache = LruCache<String, ExtractedArtPalette>(24)
+
+    suspend fun extractAuroraPalette(
+        context: Context,
+        trackId: Long,
+        artUri: String?,
+        filePath: String?,
+        fallbackColors: MyatoExtendedColors,
+    ): ExtractedArtPalette {
+        val cacheKey = "${trackId}_${artUri.orEmpty()}_${filePath.orEmpty()}"
+        auroraCache.get(cacheKey)?.let { cached ->
+            return if (cached.hasArtwork) cached else fallbackPalette(fallbackColors)
+        }
+
+        val extracted = withContext(Dispatchers.IO) {
+            val bitmap = loadSampledCoverBitmap(context, artUri, filePath, targetMaxDim = 128)
+                ?: return@withContext null
+
+            val palette = runCatching {
+                Palette.from(bitmap)
+                    .maximumColorCount(12)
+                    .resizeBitmapArea(128 * 128)
+                    .generate()
+            }.getOrNull()
+
+            bitmap.recycle()
+            if (palette == null) return@withContext null
+
+            val primaryInt = palette.vibrantSwatch?.rgb
+                ?: palette.lightVibrantSwatch?.rgb
+                ?: palette.dominantSwatch?.rgb
+            val secondaryInt = palette.lightVibrantSwatch?.rgb
+                ?: palette.mutedSwatch?.rgb
+                ?: palette.darkVibrantSwatch?.rgb
+            val tertiaryInt = palette.darkVibrantSwatch?.rgb
+                ?: palette.lightMutedSwatch?.rgb
+                ?: palette.dominantSwatch?.rgb
+            val darkInt = palette.darkMutedSwatch?.rgb
+                ?: palette.darkVibrantSwatch?.rgb
+
+            val primary = primaryInt?.let { Color(it) } ?: fallbackColors.primary
+            val secondary = secondaryInt?.let { Color(it) } ?: fallbackColors.secondary
+            val tertiary = tertiaryInt?.let { Color(it) } ?: primary.copy(alpha = 0.85f)
+            val darkBase = darkInt?.let { Color(darkenArgb(it, 0.28f)) } ?: fallbackColors.background
+
+            ExtractedArtPalette(
+                primary = primary,
+                secondary = secondary,
+                tertiary = tertiary,
+                darkBase = darkBase,
+                hasArtwork = true,
+            )
+        }
+
+        val result = extracted ?: fallbackPalette(fallbackColors)
+        auroraCache.put(cacheKey, result)
+        return result
+    }
+
+    private fun fallbackPalette(colors: MyatoExtendedColors): ExtractedArtPalette {
+        return ExtractedArtPalette(
+            primary = colors.primary,
+            secondary = colors.secondary,
+            tertiary = colors.primary.copy(alpha = 0.72f),
+            darkBase = colors.background,
+            hasArtwork = false,
+        )
+    }
 
     suspend fun extractThemeFromTrack(
         context: Context,
@@ -22,7 +95,7 @@ object AlbumArtPaletteExtractor {
         baseTheme: MyatoTheme,
         customName: String = "Capa Atual",
     ): MyatoTheme = withContext(Dispatchers.IO) {
-        val bitmap = loadCoverBitmap(context, artUri, filePath)
+        val bitmap = loadSampledCoverBitmap(context, artUri, filePath, targetMaxDim = 160)
             ?: return@withContext baseTheme.copy(
                 id = "custom_palette_${System.currentTimeMillis()}",
                 name = customName,
@@ -62,11 +135,26 @@ object AlbumArtPaletteExtractor {
         )
     }
 
-    private fun loadCoverBitmap(context: Context, artUri: String?, filePath: String?): Bitmap? {
+    private fun loadSampledCoverBitmap(
+        context: Context,
+        artUri: String?,
+        filePath: String?,
+        targetMaxDim: Int,
+    ): Bitmap? {
         if (!artUri.isNullOrBlank()) {
             runCatching {
-                context.contentResolver.openInputStream(Uri.parse(artUri))?.use { stream ->
-                    return BitmapFactory.decodeStream(stream)
+                val uri = Uri.parse(artUri)
+                val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, boundsOpts)
+                }
+                val decodeOpts = BitmapFactory.Options().apply {
+                    inSampleSize = calculateInSampleSize(boundsOpts.outWidth, boundsOpts.outHeight, targetMaxDim)
+                    inPreferredConfig = Bitmap.Config.RGB_565
+                }
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val bmp = BitmapFactory.decodeStream(stream, null, decodeOpts)
+                    if (bmp != null) return bmp
                 }
             }
         }
@@ -76,7 +164,13 @@ object AlbumArtPaletteExtractor {
                 retriever.setDataSource(filePath)
                 val bytes = retriever.embeddedPicture
                 if (bytes != null) {
-                    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, boundsOpts)
+                    val decodeOpts = BitmapFactory.Options().apply {
+                        inSampleSize = calculateInSampleSize(boundsOpts.outWidth, boundsOpts.outHeight, targetMaxDim)
+                        inPreferredConfig = Bitmap.Config.RGB_565
+                    }
+                    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts)
                 }
             } catch (_: Exception) {
             } finally {
@@ -84,6 +178,18 @@ object AlbumArtPaletteExtractor {
             }
         }
         return null
+    }
+
+    private fun calculateInSampleSize(width: Int, height: Int, maxDim: Int): Int {
+        var inSampleSize = 1
+        if (width > maxDim || height > maxDim) {
+            var halfW = width / 2
+            var halfH = height / 2
+            while ((halfW / inSampleSize) >= maxDim && (halfH / inSampleSize) >= maxDim) {
+                inSampleSize *= 2
+            }
+        }
+        return inSampleSize.coerceAtLeast(1)
     }
 
     private fun darkenArgb(color: Int, factor: Float): Long {
@@ -94,3 +200,4 @@ object AlbumArtPaletteExtractor {
         return argb.toLong() and 0xFFFFFFFFL
     }
 }
+

@@ -45,7 +45,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,6 +65,8 @@ import com.example.core.designsystem.CompactTrackRow
 import com.example.core.designsystem.LocalMyatoColors
 import com.example.core.designsystem.MyatoCompactBrandBadge
 import com.example.core.designsystem.SectionHeader
+import com.example.core.designsystem.StaggeredEntryContainer
+import com.example.core.designsystem.pressScaleFeedback
 import com.example.domain.models.ListeningStatsSummary
 import com.example.domain.models.MusicTrack
 import com.example.domain.models.PlaybackQueue
@@ -96,6 +100,9 @@ fun HomeScreen(
     onTrackMoreClick: (MusicTrack) -> Unit,
 ) {
     val colors = LocalMyatoColors.current
+    val topRecent = remember(recentTracks) { recentTracks.take(6) }
+    val topPlayed = remember(mostPlayed) { mostPlayed.take(6) }
+    val heroInteraction = remember { MutableInteractionSource() }
 
     LazyColumn(
         modifier = Modifier
@@ -104,7 +111,7 @@ fun HomeScreen(
             .testTag("home_screen"),
         contentPadding = PaddingValues(bottom = 140.dp),
     ) {
-        item {
+        item(key = "home_header", contentType = "home_header") {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -141,7 +148,7 @@ fun HomeScreen(
         }
 
         // Quick Search Bar
-        item {
+        item(key = "home_search", contentType = "home_search") {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -170,20 +177,22 @@ fun HomeScreen(
         }
 
         // Hero Resume / Quick Shuffle Banner
-        item {
+        item(key = "home_hero", contentType = "home_hero") {
             val current = playbackState.currentTrack
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .clickable {
-                        if (current != null) onOpenPlayer()
-                        else if (tracks.isNotEmpty()) onPlayTrackList(tracks.shuffled(), 0, "Mix Aleatório", QueueOriginType.ALL_SONGS)
-                        else onOpenPermissions()
-                    },
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = colors.card),
-            ) {
+            StaggeredEntryContainer(index = 0) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .pressScaleFeedback(interactionSource = heroInteraction, pressedScale = 0.98f)
+                        .clickable(interactionSource = heroInteraction, indication = androidx.compose.foundation.LocalIndication.current) {
+                            if (current != null) onOpenPlayer()
+                            else if (tracks.isNotEmpty()) onPlayTrackList(tracks.shuffled(), 0, "Mix Aleatório", QueueOriginType.ALL_SONGS)
+                            else onOpenPermissions()
+                        },
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.card),
+                ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -245,10 +254,11 @@ fun HomeScreen(
                     }
                 }
             }
+            }
         }
 
         // Quick Tools Grid
-        item {
+        item(key = "home_tools", contentType = "home_tools") {
             Spacer(Modifier.height(10.dp))
             SectionHeader("Ferramentas MYATO")
             LazyRow(
@@ -267,14 +277,14 @@ fun HomeScreen(
 
         // Active & Recent Queues
         if (queues.isNotEmpty()) {
-            item {
+            item(key = "home_queues", contentType = "home_queues") {
                 Spacer(Modifier.height(10.dp))
                 SectionHeader("Múltiplas Filas", actionLabel = "Gerenciar", onAction = onOpenQueues)
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(queues, key = { it.id }) { queue ->
+                    items(queues, key = { it.id }, contentType = { "queue_card" }) { queue ->
                         Card(
                             modifier = Modifier
                                 .width(180.dp)
@@ -311,12 +321,12 @@ fun HomeScreen(
         }
 
         // Recently Added
-        if (recentTracks.isNotEmpty()) {
-            item {
+        if (topRecent.isNotEmpty()) {
+            item(key = "recent_header", contentType = "section_header") {
                 Spacer(Modifier.height(12.dp))
                 SectionHeader("Adicionadas recentemente", actionLabel = "Ver todas", onAction = onOpenAllSongs)
             }
-            itemsIndexed(recentTracks.take(6), key = { _, t -> "recent_${t.id}" }) { idx, track ->
+            itemsIndexed(topRecent, key = { _, t -> "recent_${t.id}" }, contentType = { _, _ -> "track_row" }) { idx, track ->
                 CompactTrackRow(
                     track = track,
                     isCurrent = playbackState.currentTrack?.id == track.id,
@@ -327,12 +337,12 @@ fun HomeScreen(
         }
 
         // Most Played
-        if (mostPlayed.isNotEmpty()) {
-            item {
+        if (topPlayed.isNotEmpty()) {
+            item(key = "top_header", contentType = "section_header") {
                 Spacer(Modifier.height(12.dp))
                 SectionHeader("Mais reproduzidas", actionLabel = "Estatísticas", onAction = onOpenStats)
             }
-            itemsIndexed(mostPlayed.take(6), key = { _, t -> "top_${t.id}" }) { idx, track ->
+            itemsIndexed(topPlayed, key = { _, t -> "top_${t.id}" }, contentType = { _, _ -> "track_row" }) { idx, track ->
                 CompactTrackRow(
                     track = track,
                     isCurrent = playbackState.currentTrack?.id == track.id,
@@ -385,8 +395,11 @@ private fun QuickToolChip(
     onClick: () -> Unit,
 ) {
     val colors = LocalMyatoColors.current
+    val interactionSource = remember { MutableInteractionSource() }
     Surface(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier
+            .pressScaleFeedback(interactionSource = interactionSource, pressedScale = 0.94f)
+            .clickable(interactionSource = interactionSource, indication = androidx.compose.foundation.LocalIndication.current, onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         color = colors.card,
     ) {

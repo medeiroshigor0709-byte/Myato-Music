@@ -16,6 +16,7 @@ import com.example.core.designsystem.BuiltInThemes
 import com.example.domain.models.AppFontOption
 import com.example.domain.models.FontApplyTarget
 import com.example.domain.models.HeadsetButtonMapping
+import com.example.domain.models.PlayerVisualBackgroundStyle
 import com.example.domain.models.TrackSortOrder
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -52,6 +53,10 @@ data class AppUserPreferences(
     val playerShowStats: Boolean = true,
     val playerQueueVisibleCount: Int = 4, // 3..5
     val playerAnimatedTransitions: Boolean = true,
+    val playerVisualStyle: PlayerVisualBackgroundStyle = PlayerVisualBackgroundStyle.AUDIO_SPECTRUM,
+    val animationsDisabled: Boolean = false,
+    val reduceMotion: Boolean = false,
+    val reduceEffectsOnLowBattery: Boolean = true,
     val activeFontId: String = AppFontCatalog.DEFAULT_FONT_ID,
     val activeGeneralFontId: String = AppFontCatalog.DEFAULT_FONT_ID,
     val activeDecorativeFontId: String = AppFontCatalog.DEFAULT_FONT_ID,
@@ -89,6 +94,10 @@ class AppPreferencesStore(private val context: Context) {
         val PLAYER_SHOW_STATS = booleanPreferencesKey("player_show_stats")
         val PLAYER_QUEUE_COUNT = intPreferencesKey("player_queue_count")
         val PLAYER_ANIM_TRANSITIONS = booleanPreferencesKey("player_anim_transitions")
+        val PLAYER_VISUAL_STYLE = stringPreferencesKey("player_visual_style")
+        val ANIMATIONS_DISABLED = booleanPreferencesKey("animations_disabled")
+        val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
+        val REDUCE_EFFECTS_LOW_BATTERY = booleanPreferencesKey("reduce_effects_low_battery")
         val ACTIVE_FONT_ID = stringPreferencesKey("active_font_id")
         val ACTIVE_GENERAL_FONT_ID = stringPreferencesKey("active_general_font_id")
         val ACTIVE_DECORATIVE_FONT_ID = stringPreferencesKey("active_decorative_font_id")
@@ -130,6 +139,10 @@ class AppPreferencesStore(private val context: Context) {
             playerShowStats = prefs[Keys.PLAYER_SHOW_STATS] ?: true,
             playerQueueVisibleCount = prefs[Keys.PLAYER_QUEUE_COUNT] ?: 4,
             playerAnimatedTransitions = prefs[Keys.PLAYER_ANIM_TRANSITIONS] ?: true,
+            playerVisualStyle = PlayerVisualBackgroundStyle.fromId(prefs[Keys.PLAYER_VISUAL_STYLE]),
+            animationsDisabled = prefs[Keys.ANIMATIONS_DISABLED] ?: false,
+            reduceMotion = prefs[Keys.REDUCE_MOTION] ?: (prefs[Keys.BATTERY_SAVER_ANIM] ?: false),
+            reduceEffectsOnLowBattery = prefs[Keys.REDUCE_EFFECTS_LOW_BATTERY] ?: true,
             activeFontId = generalId,
             activeGeneralFontId = generalId,
             activeDecorativeFontId = decorativeId,
@@ -275,6 +288,31 @@ class AppPreferencesStore(private val context: Context) {
     suspend fun setPlayerAnimatedTransitions(enabled: Boolean) {
         context.myatoDataStore.edit {
             it[Keys.PLAYER_ANIM_TRANSITIONS] = enabled
+        }
+    }
+
+    suspend fun setPlayerVisualStyle(style: PlayerVisualBackgroundStyle) {
+        context.myatoDataStore.edit {
+            it[Keys.PLAYER_VISUAL_STYLE] = style.id
+        }
+    }
+
+    suspend fun setAnimationsDisabled(disabled: Boolean) {
+        context.myatoDataStore.edit {
+            it[Keys.ANIMATIONS_DISABLED] = disabled
+        }
+    }
+
+    suspend fun setReduceMotion(reduced: Boolean) {
+        context.myatoDataStore.edit {
+            it[Keys.REDUCE_MOTION] = reduced
+            it[Keys.BATTERY_SAVER_ANIM] = reduced
+        }
+    }
+
+    suspend fun setReduceEffectsOnLowBattery(enabled: Boolean) {
+        context.myatoDataStore.edit {
+            it[Keys.REDUCE_EFFECTS_LOW_BATTERY] = enabled
         }
     }
 

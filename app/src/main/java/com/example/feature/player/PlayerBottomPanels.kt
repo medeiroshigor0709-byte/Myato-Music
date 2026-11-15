@@ -102,17 +102,20 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.verticalScroll
 import com.example.core.audio.PlaybackUiState
 import com.example.core.common.TimeFormatter
 import com.example.core.designsystem.AlbumArtPaletteExtractor
 import com.example.core.designsystem.AlbumArtwork
 import com.example.core.designsystem.BuiltInThemes
+import com.example.core.designsystem.LocalMotionSettings
 import com.example.core.designsystem.LocalMyatoColors
 import com.example.core.metadata.LrcLyricsEngine
 import com.example.domain.models.AnimationMode
 import com.example.domain.models.ListeningStatsSummary
 import com.example.domain.models.LyricLine
 import com.example.domain.models.MusicTrack
+import com.example.domain.models.PlayerVisualBackgroundStyle
 import kotlin.math.sin
 
 /**
@@ -130,36 +133,42 @@ fun AnimatedAudioVisualizerSection(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalMyatoColors.current
+    val motion = LocalMotionSettings.current
     val barCount = 18
+    val runMotion = isPlaying && motion.isAnimationsActive
 
-    // Harmonic continuous sine animation for organic pulsing fallback / augmentation
-    val infiniteTransition = rememberInfiniteTransition(label = "viz_motion")
-    val phase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 6.28318f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "viz_phase",
-    )
+    // Harmonic continuous sine animation only while actively playing in foreground
+    val phase = if (runMotion) {
+        val infiniteTransition = rememberInfiniteTransition(label = "viz_motion")
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 6.28318f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(if (motion.isReducedMotionActive) 3600 else 2200, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "viz_phase",
+        ).value
+    } else 0f
+
+    val effectiveIntensity = if (motion.animationsDisabled) 0f else intensity * (if (motion.isReducedMotionActive) 0.55f else 1f)
 
     // Compute heights with smooth animated transition
     val heights = (0 until barCount).map { i ->
         val rawSpectrum = spectrumBars.getOrNull(i.coerceAtMost(spectrumBars.lastIndex)) ?: 0f
-        val harmonicPulse = if (isPlaying) {
+        val harmonicPulse = if (runMotion) {
             val bassFactor = if (i < 4) 1.25f else 0.85f
             val wave = (sin(phase + (i * 0.45f)) * 0.5f + 0.5f) * bassFactor
             wave.toFloat()
         } else {
             0.05f
         }
-        val target = if (rawSpectrum > 0.05f) {
+        val target = if (rawSpectrum > 0.05f && isPlaying) {
             (rawSpectrum * 1.2f).coerceIn(0.1f, 1f)
         } else {
-            if (isPlaying) (harmonicPulse * 0.75f * volumeFraction.coerceAtLeast(0.4f)).coerceIn(0.12f, 0.95f)
+            if (runMotion) (harmonicPulse * 0.72f * volumeFraction.coerceAtLeast(0.4f)).coerceIn(0.10f, 0.92f)
             else 0.05f
-        } * intensity
+        } * effectiveIntensity.coerceAtLeast(0.05f)
 
         val animatedHeight by animateFloatAsState(
             targetValue = target.coerceIn(0.04f, 1f),
@@ -221,6 +230,11 @@ fun AnimatedAudioVisualizerSection(
             Spacer(Modifier.height(10.dp))
 
             // Canvas renderer according to chosen visualizer style (BARS, WAVE, PEAKS)
+            val wavePath = remember { Path() }
+            val waveFillPath = remember { Path() }
+            val barBrush = remember(colors.primary, colors.secondary) {
+                Brush.verticalGradient(colors = listOf(colors.secondary, colors.primary))
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -235,26 +249,26 @@ fun AnimatedAudioVisualizerSection(
 
                     when (style) {
                         "WAVE" -> {
-                            val path = Path()
-                            val fillPath = Path()
-                            fillPath.moveTo(0f, h)
+                            wavePath.reset()
+                            waveFillPath.reset()
+                            waveFillPath.moveTo(0f, h)
 
                             heights.forEachIndexed { index, fraction ->
                                 val x = index * (w / (barCount - 1).coerceAtLeast(1))
                                 val y = h - (fraction * h * 0.9f)
                                 if (index == 0) {
-                                    path.moveTo(x, y)
-                                    fillPath.lineTo(x, y)
+                                    wavePath.moveTo(x, y)
+                                    waveFillPath.lineTo(x, y)
                                 } else {
-                                    path.lineTo(x, y)
-                                    fillPath.lineTo(x, y)
+                                    wavePath.lineTo(x, y)
+                                    waveFillPath.lineTo(x, y)
                                 }
                             }
-                            fillPath.lineTo(w, h)
-                            fillPath.close()
+                            waveFillPath.lineTo(w, h)
+                            waveFillPath.close()
 
                             drawPath(
-                                path = fillPath,
+                                path = waveFillPath,
                                 brush = Brush.verticalGradient(
                                     colors = listOf(
                                         colors.primary.copy(alpha = 0.35f),
@@ -263,7 +277,7 @@ fun AnimatedAudioVisualizerSection(
                                 ),
                             )
                             drawPath(
-                                path = path,
+                                path = wavePath,
                                 brush = Brush.horizontalGradient(
                                     colors = listOf(colors.secondary, colors.primary, colors.secondary),
                                 ),
@@ -277,9 +291,7 @@ fun AnimatedAudioVisualizerSection(
                                 val barH = (fraction * h * 0.88f).coerceAtLeast(4f)
                                 val y = h - barH
                                 drawRoundRect(
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(colors.secondary, colors.primary),
-                                    ),
+                                    brush = barBrush,
                                     topLeft = Offset(x, y),
                                     size = Size(barWidth, barH),
                                     cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f),
@@ -300,9 +312,7 @@ fun AnimatedAudioVisualizerSection(
                                 val barH = (fraction * h * 0.92f).coerceAtLeast(4f)
                                 val y = h - barH
                                 drawRoundRect(
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(colors.secondary, colors.primary),
-                                    ),
+                                    brush = barBrush,
                                     topLeft = Offset(x, y),
                                     size = Size(barWidth, barH),
                                     cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f),
@@ -958,6 +968,9 @@ fun FloatingAmbientParticles(
     particleColor: Color,
     modifier: Modifier = Modifier,
 ) {
+    val motion = LocalMotionSettings.current
+    if (!isPlaying || !motion.isAnimationsActive || motion.isReducedMotionActive) return
+
     val infiniteTransition = rememberInfiniteTransition(label = "particles")
     val phase by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -970,7 +983,6 @@ fun FloatingAmbientParticles(
     )
 
     Canvas(modifier = modifier) {
-        if (!isPlaying) return@Canvas
         val w = size.width
         val h = size.height
 
@@ -979,7 +991,7 @@ fun FloatingAmbientParticles(
             val progress = (phase + (i * 0.125f)) % 1f
             val x = (sin((phase * 6.28f) + i) * 0.35f + 0.5f) * w
             val y = h - (progress * h)
-            val alpha = (sin(progress * 3.14159f) * 0.28f).coerceIn(0f, 0.4f)
+            val alpha = (sin(progress * 3.14159f) * 0.25f * motion.effectiveIntensity).coerceIn(0f, 0.35f)
             val radius = 3.dp.toPx() + (i % 3) * 1.5.dp.toPx()
 
             drawCircle(
@@ -993,7 +1005,7 @@ fun FloatingAmbientParticles(
 
 /**
  * 7. Player Settings BottomSheet
- * Permite personalizar o visualizador, partículas, luz ambiente, quantidade de músicas na fila e estatísticas.
+ * Permite personalizar estilo visual da reprodução, visualizador, intensidade, acessibilidade/bateria, partículas e fila.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1006,6 +1018,10 @@ fun PlayerSettingsSheet(
     showStatsEnabled: Boolean,
     queueCount: Int,
     animatedTransitions: Boolean,
+    playerVisualStyle: PlayerVisualBackgroundStyle = PlayerVisualBackgroundStyle.AUDIO_SPECTRUM,
+    animationsDisabled: Boolean = false,
+    reduceMotion: Boolean = false,
+    reduceEffectsOnLowBattery: Boolean = true,
     onDismiss: () -> Unit,
     onSetVisualizerEnabled: (Boolean) -> Unit,
     onSetVisualizerStyle: (String) -> Unit,
@@ -1015,6 +1031,10 @@ fun PlayerSettingsSheet(
     onSetShowStatsEnabled: (Boolean) -> Unit,
     onSetQueueCount: (Int) -> Unit,
     onSetAnimatedTransitions: (Boolean) -> Unit,
+    onSetPlayerVisualStyle: (PlayerVisualBackgroundStyle) -> Unit = {},
+    onSetAnimationsDisabled: (Boolean) -> Unit = {},
+    onSetReduceMotion: (Boolean) -> Unit = {},
+    onSetReduceEffectsOnLowBattery: (Boolean) -> Unit = {},
 ) {
     val colors = LocalMyatoColors.current
 
@@ -1025,6 +1045,7 @@ fun PlayerSettingsSheet(
     ) {
         Column(
             modifier = Modifier
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 10.dp)
                 .padding(bottom = 28.dp),
         ) {
@@ -1041,12 +1062,27 @@ fun PlayerSettingsSheet(
 
             Spacer(Modifier.height(16.dp))
 
+            PlayerVisualStyleSelectorSection(
+                selectedStyle = playerVisualStyle,
+                effectIntensity = animationIntensity,
+                animationsDisabled = animationsDisabled,
+                reduceMotion = reduceMotion,
+                reduceEffectsOnLowBattery = reduceEffectsOnLowBattery,
+                onSelectStyle = onSetPlayerVisualStyle,
+                onIntensityChange = onSetAnimationIntensity,
+                onSetAnimationsDisabled = onSetAnimationsDisabled,
+                onSetReduceMotion = onSetReduceMotion,
+                onSetReduceEffectsOnLowBattery = onSetReduceEffectsOnLowBattery,
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = colors.textSecondary.copy(alpha = 0.15f))
+
             // Visualizer Toggle
             SettingSwitchRow("Ativar Visualizador de Áudio", visualizerEnabled, onSetVisualizerEnabled)
 
             if (visualizerEnabled) {
                 Spacer(Modifier.height(8.dp))
-                Text("Estilo do Visualizador", style = MaterialTheme.typography.labelMedium, color = colors.primary)
+                Text("Estilo do Painel Visualizador", style = MaterialTheme.typography.labelMedium, color = colors.primary)
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("BARS" to "Barras", "WAVE" to "Ondas", "PEAKS" to "Picos").forEach { (key, label) ->
                         FilterChip(
@@ -1060,28 +1096,12 @@ fun PlayerSettingsSheet(
                         )
                     }
                 }
-
-                Spacer(Modifier.height(8.dp))
-                Text("Intensidade da Animação", style = MaterialTheme.typography.labelMedium, color = colors.primary)
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(0.5f to "Suave", 1.0f to "Normal", 1.5f to "Intensa").forEach { (factor, label) ->
-                        FilterChip(
-                            selected = kotlin.math.abs(animationIntensity - factor) < 0.1f,
-                            onClick = { onSetAnimationIntensity(factor) },
-                            label = { Text(label) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = colors.primary,
-                                selectedLabelColor = Color.Black,
-                            ),
-                        )
-                    }
-                }
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = colors.textSecondary.copy(alpha = 0.15f))
 
             // Ambient background lighting & particles
-            SettingSwitchRow("Iluminação Ambiente da Capa", ambientBgEnabled, onSetAmbientBgEnabled)
+            SettingSwitchRow("Cores Dinâmicas da Capa", ambientBgEnabled, onSetAmbientBgEnabled)
             SettingSwitchRow("Partículas Luminosas Sutis", particlesEnabled, onSetParticlesEnabled)
             SettingSwitchRow("Painel de Estatísticas", showStatsEnabled, onSetShowStatsEnabled)
             SettingSwitchRow("Transições Animadas de Faixa", animatedTransitions, onSetAnimatedTransitions)

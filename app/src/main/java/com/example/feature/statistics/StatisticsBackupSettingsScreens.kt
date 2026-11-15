@@ -47,6 +47,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -77,8 +79,10 @@ import com.example.domain.models.BackupPreview
 import com.example.domain.models.FolderItem
 import com.example.domain.models.HeadsetButtonMapping
 import com.example.domain.models.ListeningStatsSummary
+import com.example.domain.models.PlayerVisualBackgroundStyle
 import com.example.domain.models.Playlist
 import com.example.feature.library.SimpleHeader
+import com.example.feature.player.PlayerVisualStyleSelectorSection
 
 /**
  * 19. Statistics Screen + CSV export of most played tracks
@@ -447,6 +451,7 @@ fun BackupScreen(
  * 24. Settings Screen — Headset multi-click mapping, Gapless, Animation saver,
  * Notification preferences, Audio Format real capability inspection, and link to About.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     preferences: AppUserPreferences,
@@ -461,9 +466,15 @@ fun SettingsScreen(
     onOpenAbout: () -> Unit,
     activeFontName: String = "MYATO Original",
     onOpenFontSettings: () -> Unit = {},
+    onSetPlayerVisualStyle: (PlayerVisualBackgroundStyle) -> Unit = {},
+    onSetEffectIntensity: (Float) -> Unit = {},
+    onSetAnimationsDisabled: (Boolean) -> Unit = {},
+    onSetReduceMotion: (Boolean) -> Unit = {},
+    onSetReduceEffectsOnLowBattery: (Boolean) -> Unit = {},
 ) {
     val colors = LocalMyatoColors.current
     var showFormatsDialog by remember { mutableStateOf(false) }
+    var showVisualStyleSheet by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -512,6 +523,12 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(12.dp))
         SettingActionRow(
+            title = "Estilo visual da reprodução",
+            subtitle = "${preferences.playerVisualStyle.title} • Transições e efeitos de movimento",
+            onClick = { showVisualStyleSheet = true },
+            modifier = Modifier.testTag("settings_visual_style_row"),
+        )
+        SettingActionRow(
             title = "Fontes e tipografia",
             subtitle = "Catálogo de fontes • Ativa: $activeFontName",
             onClick = onOpenFontSettings,
@@ -524,6 +541,34 @@ fun SettingsScreen(
         SettingActionRow("Sobre o MYATO MUSIC", "Versão, privacidade offline e arquitetura", onOpenAbout)
 
         Spacer(Modifier.height(140.dp))
+    }
+
+    if (showVisualStyleSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showVisualStyleSheet = false },
+            containerColor = colors.altBackground,
+            contentColor = colors.textPrimary,
+        ) {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .padding(bottom = 28.dp),
+            ) {
+                PlayerVisualStyleSelectorSection(
+                    selectedStyle = preferences.playerVisualStyle,
+                    effectIntensity = preferences.visualizerAnimationIntensity,
+                    animationsDisabled = preferences.animationsDisabled,
+                    reduceMotion = preferences.reduceMotion,
+                    reduceEffectsOnLowBattery = preferences.reduceEffectsOnLowBattery,
+                    onSelectStyle = onSetPlayerVisualStyle,
+                    onIntensityChange = onSetEffectIntensity,
+                    onSetAnimationsDisabled = onSetAnimationsDisabled,
+                    onSetReduceMotion = onSetReduceMotion,
+                    onSetReduceEffectsOnLowBattery = onSetReduceEffectsOnLowBattery,
+                )
+            }
+        }
     }
 
     if (showFormatsDialog) {

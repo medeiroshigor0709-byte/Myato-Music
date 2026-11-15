@@ -1,5 +1,11 @@
 package com.example.feature.library
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,7 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -70,6 +76,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -92,6 +99,7 @@ import com.example.core.designsystem.CompactTrackRow
 import com.example.core.designsystem.CreatePlaylistDialog
 import com.example.core.designsystem.DeleteTracksConfirmDialog
 import com.example.core.designsystem.LocalMyatoColors
+import com.example.core.designsystem.StaggeredEntryContainer
 import com.example.core.storage.DuplicateGroup
 import com.example.domain.models.AlbumItem
 import com.example.domain.models.ArtistItem
@@ -121,16 +129,18 @@ fun LibraryHubScreen(
     onRefreshLibrary: () -> Unit,
 ) {
     val colors = LocalMyatoColors.current
-    val itemsList = listOf(
-        Triple("Todas as músicas", "$tracksCount faixas", Icons.Rounded.MusicNote to onOpenAllSongs),
-        Triple("Álbuns", "$albumsCount álbuns", Icons.Rounded.Album to onOpenAlbums),
-        Triple("Artistas", "$artistsCount artistas", Icons.Rounded.Person to onOpenArtists),
-        Triple("Pastas", "$foldersCount pastas", Icons.Rounded.Folder to onOpenFolders),
-        Triple("Gêneros", "$genresCount gêneros", Icons.Rounded.Category to onOpenGenres),
-        Triple("Favoritos", "$favoritesCount favoritas", Icons.Rounded.Favorite to onOpenFavorites),
-        Triple("Gerenciador de Arquivos", "Navegar, mover, copiar", Icons.Rounded.FolderOpen to onOpenFileManager),
-        Triple("Múltiplas Filas", "Gerenciar filas ativas", Icons.AutoMirrored.Rounded.QueueMusic to onOpenQueues),
-    )
+    val itemsList = remember(tracksCount, albumsCount, artistsCount, foldersCount, genresCount, favoritesCount) {
+        listOf(
+            Triple("Todas as músicas", "$tracksCount faixas", Icons.Rounded.MusicNote to onOpenAllSongs),
+            Triple("Álbuns", "$albumsCount álbuns", Icons.Rounded.Album to onOpenAlbums),
+            Triple("Artistas", "$artistsCount artistas", Icons.Rounded.Person to onOpenArtists),
+            Triple("Pastas", "$foldersCount pastas", Icons.Rounded.Folder to onOpenFolders),
+            Triple("Gêneros", "$genresCount gêneros", Icons.Rounded.Category to onOpenGenres),
+            Triple("Favoritos", "$favoritesCount favoritas", Icons.Rounded.Favorite to onOpenFavorites),
+            Triple("Gerenciador de Arquivos", "Navegar, mover, copiar", Icons.Rounded.FolderOpen to onOpenFileManager),
+            Triple("Múltiplas Filas", "Gerenciar filas ativas", Icons.AutoMirrored.Rounded.QueueMusic to onOpenQueues),
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -157,29 +167,31 @@ fun LibraryHubScreen(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(itemsList) { (title, subtitle, pair) ->
+            gridItemsIndexed(itemsList, key = { _, item -> item.first }) { idx, (title, subtitle, pair) ->
                 val (icon, action) = pair
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = action),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = colors.card),
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(colors.primary.copy(alpha = 0.16f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(icon, contentDescription = null, tint = colors.primary)
+                StaggeredEntryContainer(index = idx) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = action),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = colors.card),
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(colors.primary.copy(alpha = 0.16f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(icon, contentDescription = null, tint = colors.primary)
+                            }
+                            Spacer(Modifier.height(14.dp))
+                            Text(title, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.height(2.dp))
+                            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1)
                         }
-                        Spacer(Modifier.height(14.dp))
-                        Text(title, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Spacer(Modifier.height(2.dp))
-                        Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1)
                     }
                 }
             }
@@ -224,7 +236,7 @@ fun AllSongsScreen(
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
 
     val selectedIds = remember { mutableStateListOf<Long>() }
-    val isSelectionMode = selectedIds.isNotEmpty()
+    val isSelectionMode by remember { derivedStateOf { selectedIds.isNotEmpty() } }
 
     val filteredByFormat = remember(tracks, formatFilter) {
         if (formatFilter == "Todos") tracks
@@ -238,9 +250,11 @@ fun AllSongsScreen(
         listOf("Todos") + tracks.map { it.formatExtension }.distinct().sorted()
     }
 
-    val selectedTracks = remember(selectedIds.toList(), tracks) {
-        val selSet = selectedIds.toSet()
-        tracks.filter { it.id in selSet }
+    val selectedTracks by remember(tracks) {
+        derivedStateOf {
+            val selSet = selectedIds.toSet()
+            if (selSet.isEmpty()) emptyList() else tracks.filter { it.id in selSet }
+        }
     }
 
     Box(
@@ -250,10 +264,11 @@ fun AllSongsScreen(
             .testTag("all_songs_screen"),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Top App Bar / Multi-selection Action Bar
+            // Top App Bar / Multi-selection Action Bar with smooth content size transition
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .animateContentSize()
                     .background(if (isSelectionMode) colors.primary.copy(alpha = 0.15f) else Color.Transparent)
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -478,39 +493,50 @@ fun AllSongsScreen(
                     .weight(1f),
                 contentPadding = PaddingValues(bottom = if (isSelectionMode) 180.dp else 140.dp),
             ) {
-                itemsIndexed(displayed, key = { _, t -> t.id }) { index, track ->
+                itemsIndexed(
+                    items = displayed,
+                    key = { _, t -> t.id },
+                    contentType = { _, _ -> "track_row" },
+                ) { index, track ->
                     val isSelected = track.id in selectedIds
-                    CompactTrackRow(
-                        track = track,
-                        isCurrent = track.id == currentTrackId,
-                        isSelectionMode = isSelectionMode,
-                        isSelected = isSelected,
-                        onClick = {
-                            if (isSelectionMode) {
+                    StaggeredEntryContainer(index = index) {
+                        CompactTrackRow(
+                            track = track,
+                            isCurrent = track.id == currentTrackId,
+                            isSelectionMode = isSelectionMode,
+                            isSelected = isSelected,
+                            onClick = {
+                                if (isSelectionMode) {
+                                    if (isSelected) selectedIds.remove(track.id) else selectedIds.add(track.id)
+                                } else {
+                                    onPlayTracks(displayed, index, "Todas as músicas", QueueOriginType.ALL_SONGS)
+                                }
+                            },
+                            onLongClick = {
                                 if (isSelected) selectedIds.remove(track.id) else selectedIds.add(track.id)
-                            } else {
-                                onPlayTracks(displayed, index, "Todas as músicas", QueueOriginType.ALL_SONGS)
-                            }
-                        },
-                        onLongClick = {
-                            if (isSelected) selectedIds.remove(track.id) else selectedIds.add(track.id)
-                        },
-                        onQuickAddToPlaylist = {
-                            onBatchAddToPlaylists(listOf(track.id))
-                        },
-                        onMoreClick = { onTrackMoreClick(track) },
-                    )
+                            },
+                            onQuickAddToPlaylist = {
+                                onBatchAddToPlaylists(listOf(track.id))
+                            },
+                            onMoreClick = { onTrackMoreClick(track) },
+                        )
+                    }
                 }
             }
         }
 
         // Sticky Bottom Bar when multiple tracks are selected
-        if (isSelectionMode) {
+        AnimatedVisibility(
+            visible = isSelectionMode,
+            enter = fadeIn() + slideInVertically { it / 2 },
+            exit = fadeOut() + slideOutVertically { it / 2 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp, vertical = 72.dp)
+                .fillMaxWidth(),
+        ) {
             Surface(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(horizontal = 16.dp, vertical = 72.dp)
-                    .fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
                 color = colors.card,
                 tonalElevation = 8.dp,
@@ -701,18 +727,20 @@ fun AlbumsScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(albums, key = { it.id }) { album ->
-                    Card(
-                        modifier = Modifier.clickable { selectedAlbum = album },
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(containerColor = colors.card),
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            AlbumArtwork(artUri = album.artUri, size = 128.dp, small = false, modifier = Modifier.fillMaxWidth())
-                            Spacer(Modifier.height(10.dp))
-                            Text(album.title, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(album.artist, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("${album.trackCount} faixas", style = MaterialTheme.typography.labelSmall, color = colors.primary)
+                gridItemsIndexed(albums, key = { _, a -> a.id }, contentType = { _, _ -> "album_card" }) { index, album ->
+                    StaggeredEntryContainer(index = index) {
+                        Card(
+                            modifier = Modifier.clickable { selectedAlbum = album },
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(containerColor = colors.card),
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                AlbumArtwork(artUri = album.artUri, size = 128.dp, small = false, modifier = Modifier.fillMaxWidth())
+                                Spacer(Modifier.height(10.dp))
+                                Text(album.title, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(album.artist, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${album.trackCount} faixas", style = MaterialTheme.typography.labelSmall, color = colors.primary)
+                            }
                         }
                     }
                 }

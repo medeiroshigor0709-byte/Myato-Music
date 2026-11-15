@@ -1,5 +1,16 @@
 package com.example.presentation
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -30,6 +41,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -37,6 +49,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -53,11 +66,14 @@ import com.example.core.designsystem.AppFontCatalog
 import com.example.core.designsystem.BuiltInThemes
 import com.example.core.designsystem.CreatePlaylistDialog
 import com.example.core.designsystem.DeleteTracksConfirmDialog
+import com.example.core.designsystem.LocalMotionSettings
 import com.example.core.designsystem.LocalMyatoColors
 import com.example.core.designsystem.MiniPlayerBar
 import com.example.core.designsystem.MyatoMusicTheme
+import com.example.core.designsystem.SlantedStripesTransitionOverlay
 import com.example.core.designsystem.TrackContextMenuSheet
 import com.example.core.designsystem.TrackDetailsDialog
+import com.example.core.designsystem.rememberMotionEnvironmentState
 import com.example.core.storage.TrackShareAndDeleteHelper
 import com.example.domain.models.MusicTrack
 import com.example.domain.models.QueueOriginType
@@ -122,6 +138,7 @@ fun MyatoRootApp(
     val eqState by viewModel.equalizerState.collectAsState()
     val eqPresets by viewModel.equalizerPresets.collectAsState()
     val spectrumBars by viewModel.spectrumBars.collectAsState()
+    val hasRealFftSignal by viewModel.hasRealFftSignal.collectAsState()
     val sleepTimerState by viewModel.sleepTimerState.collectAsState()
     val statsSummary by viewModel.statsSummary.collectAsState()
     val backupHistory by viewModel.backupHistory.collectAsState()
@@ -175,16 +192,24 @@ fun MyatoRootApp(
         }
     }
 
-    MyatoMusicTheme(
-        activeTheme = activeTheme,
-        activeFontId = preferences.activeGeneralFontId,
-        activeGeneralFontId = preferences.activeGeneralFontId,
-        activeDecorativeFontId = preferences.activeDecorativeFontId,
-        customFonts = preferences.customFonts,
-    ) {
-        val colors = LocalMyatoColors.current
-        val navBackStack by navController.currentBackStackEntryAsState()
-        val currentDestination = navBackStack?.destination
+    val motionSettings = rememberMotionEnvironmentState(
+        preferences = preferences,
+        themeAnimationMode = activeTheme.animationMode,
+        onAppForegroundChanged = { inFg -> viewModel.setAppForeground(inFg) },
+    )
+
+    CompositionLocalProvider(LocalMotionSettings provides motionSettings) {
+        MyatoMusicTheme(
+            activeTheme = activeTheme,
+            activeFontId = preferences.activeGeneralFontId,
+            activeGeneralFontId = preferences.activeGeneralFontId,
+            activeDecorativeFontId = preferences.activeDecorativeFontId,
+            customFonts = preferences.customFonts,
+        ) {
+            val colors = LocalMyatoColors.current
+            val navBackStack by navController.currentBackStackEntryAsState()
+            val currentDestination = navBackStack?.destination
+            val currentRouteKey = currentDestination?.route ?: ""
 
         val isChromeless = currentDestination?.hasRoute<MyatoRoute.Splash>() == true ||
             currentDestination?.hasRoute<MyatoRoute.Onboarding>() == true ||
@@ -216,6 +241,11 @@ fun MyatoRootApp(
                     ) {
                         topItems.forEach { item ->
                             val selected = currentDestination?.hasRoute(item.route::class) == true
+                            val iconScale by animateFloatAsState(
+                                targetValue = if (selected && motionSettings.isAnimationsActive) 1.14f else 1f,
+                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+                                label = "rail_icon_scale_${item.testTag}",
+                            )
                             NavigationRailItem(
                                 selected = selected,
                                 onClick = {
@@ -225,7 +255,13 @@ fun MyatoRootApp(
                                         restoreState = true
                                     }
                                 },
-                                icon = { Icon(item.icon, contentDescription = item.label) },
+                                icon = {
+                                    Icon(
+                                        item.icon,
+                                        contentDescription = item.label,
+                                        modifier = Modifier.scale(iconScale),
+                                    )
+                                },
                                 label = { Text(item.label) },
                                 colors = NavigationRailItemDefaults.colors(
                                     selectedIconColor = Color.Black,
@@ -268,6 +304,11 @@ fun MyatoRootApp(
                                     ) {
                                         topItems.forEach { item ->
                                             val selected = currentDestination?.hasRoute(item.route::class) == true
+                                            val iconScale by animateFloatAsState(
+                                                targetValue = if (selected && motionSettings.isAnimationsActive) 1.14f else 1f,
+                                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+                                                label = "bar_icon_scale_${item.testTag}",
+                                            )
                                             NavigationBarItem(
                                                 selected = selected,
                                                 onClick = {
@@ -277,7 +318,13 @@ fun MyatoRootApp(
                                                         restoreState = true
                                                     }
                                                 },
-                                                icon = { Icon(item.icon, contentDescription = item.label) },
+                                                icon = {
+                                                    Icon(
+                                                        item.icon,
+                                                        contentDescription = item.label,
+                                                        modifier = Modifier.scale(iconScale),
+                                                    )
+                                                },
                                                 label = { Text(item.label, maxLines = 1) },
                                                 colors = NavigationBarItemDefaults.colors(
                                                     selectedIconColor = Color.Black,
@@ -300,9 +347,46 @@ fun MyatoRootApp(
                             .fillMaxSize()
                             .padding(innerPadding),
                     ) {
+                        val navEnter = remember(motionSettings.isAnimationsActive, motionSettings.isReducedMotionActive) {
+                            when {
+                                !motionSettings.isAnimationsActive -> EnterTransition.None
+                                motionSettings.isReducedMotionActive -> fadeIn(tween(180))
+                                else -> slideInHorizontally(tween(380, easing = FastOutSlowInEasing)) { (it * 0.28f).toInt() } +
+                                    fadeIn(tween(320))
+                            }
+                        }
+                        val navExit = remember(motionSettings.isAnimationsActive, motionSettings.isReducedMotionActive) {
+                            when {
+                                !motionSettings.isAnimationsActive -> ExitTransition.None
+                                motionSettings.isReducedMotionActive -> fadeOut(tween(180))
+                                else -> slideOutHorizontally(tween(380, easing = FastOutSlowInEasing)) { -(it * 0.25f).toInt() } +
+                                    fadeOut(tween(260))
+                            }
+                        }
+                        val navPopEnter = remember(motionSettings.isAnimationsActive, motionSettings.isReducedMotionActive) {
+                            when {
+                                !motionSettings.isAnimationsActive -> EnterTransition.None
+                                motionSettings.isReducedMotionActive -> fadeIn(tween(180))
+                                else -> slideInHorizontally(tween(380, easing = FastOutSlowInEasing)) { -(it * 0.25f).toInt() } +
+                                    fadeIn(tween(320))
+                            }
+                        }
+                        val navPopExit = remember(motionSettings.isAnimationsActive, motionSettings.isReducedMotionActive) {
+                            when {
+                                !motionSettings.isAnimationsActive -> ExitTransition.None
+                                motionSettings.isReducedMotionActive -> fadeOut(tween(180))
+                                else -> slideOutHorizontally(tween(380, easing = FastOutSlowInEasing)) { (it * 0.28f).toInt() } +
+                                    fadeOut(tween(260))
+                            }
+                        }
+
                         NavHost(
                             navController = navController,
                             startDestination = MyatoRoute.Splash,
+                            enterTransition = { navEnter },
+                            exitTransition = { navExit },
+                            popEnterTransition = { navPopEnter },
+                            popExitTransition = { navPopExit },
                         ) {
                             composable<MyatoRoute.Splash> {
                                 SplashScreen(
@@ -557,6 +641,11 @@ fun MyatoRootApp(
                                     showStatsEnabled = preferences.playerShowStats,
                                     queueVisibleCount = preferences.playerQueueVisibleCount,
                                     animatedTransitions = preferences.playerAnimatedTransitions,
+                                    hasRealFftSignal = hasRealFftSignal,
+                                    playerVisualStyle = preferences.playerVisualStyle,
+                                    animationsDisabled = preferences.animationsDisabled,
+                                    reduceMotion = preferences.reduceMotion,
+                                    reduceEffectsOnLowBattery = preferences.reduceEffectsOnLowBattery,
                                     onClose = { navController.popBackStack() },
                                     onPlayPause = { viewModel.playbackController.togglePlayPause() },
                                     onNext = { viewModel.playbackController.skipNext() },
@@ -590,6 +679,10 @@ fun MyatoRootApp(
                                     onSetShowStatsEnabled = { viewModel.setPlayerShowStats(it) },
                                     onSetQueueCount = { viewModel.setPlayerQueueVisibleCount(it) },
                                     onSetAnimatedTransitions = { viewModel.setPlayerAnimatedTransitions(it) },
+                                    onSetPlayerVisualStyle = { viewModel.setPlayerVisualStyle(it) },
+                                    onSetAnimationsDisabled = { viewModel.setAnimationsDisabled(it) },
+                                    onSetReduceMotion = { viewModel.setReduceMotion(it) },
+                                    onSetReduceEffectsOnLowBattery = { viewModel.setReduceEffectsOnLowBattery(it) },
                                 )
                             }
 
@@ -784,6 +877,11 @@ fun MyatoRootApp(
                                     onOpenAbout = { navController.navigate(MyatoRoute.About) },
                                     activeFontName = activeFontSummary,
                                     onOpenFontSettings = { navController.navigate(MyatoRoute.FontSettings) },
+                                    onSetPlayerVisualStyle = { viewModel.setPlayerVisualStyle(it) },
+                                    onSetEffectIntensity = { viewModel.setVisualizerAnimationIntensity(it) },
+                                    onSetAnimationsDisabled = { viewModel.setAnimationsDisabled(it) },
+                                    onSetReduceMotion = { viewModel.setReduceMotion(it) },
+                                    onSetReduceEffectsOnLowBattery = { viewModel.setReduceEffectsOnLowBattery(it) },
                                 )
                             }
 
@@ -791,6 +889,17 @@ fun MyatoRootApp(
                                 AboutScreen(onBack = { navController.popBackStack() })
                             }
                         }
+
+                        // Synchronized Slanted Stripes transition overlay on tab/section switches
+                        val isSlantedTransitionEligible = motionSettings.shouldAnimateTabTransitions &&
+                            currentDestination?.hasRoute<MyatoRoute.Splash>() != true &&
+                            currentDestination?.hasRoute<MyatoRoute.Onboarding>() != true
+                        SlantedStripesTransitionOverlay(
+                            routeKey = currentRouteKey,
+                            enabled = isSlantedTransitionEligible,
+                            intensity = motionSettings.effectiveIntensity,
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
                 }
             }
@@ -877,15 +986,16 @@ fun MyatoRootApp(
             )
         }
 
-        createPlaylistWithTracksTarget?.let { targetIds ->
-            CreatePlaylistDialog(
-                initialName = "",
-                trackCount = targetIds.size,
-                onDismiss = { createPlaylistWithTracksTarget = null },
-                onConfirm = { name ->
-                    viewModel.createPlaylistWithTracks(name, targetIds)
-                },
-            )
+            createPlaylistWithTracksTarget?.let { targetIds ->
+                CreatePlaylistDialog(
+                    initialName = "",
+                    trackCount = targetIds.size,
+                    onDismiss = { createPlaylistWithTracksTarget = null },
+                    onConfirm = { name ->
+                        viewModel.createPlaylistWithTracks(name, targetIds)
+                    },
+                )
+            }
         }
     }
 }

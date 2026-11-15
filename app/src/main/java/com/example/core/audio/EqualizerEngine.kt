@@ -1,6 +1,8 @@
 package com.example.core.audio
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -9,6 +11,7 @@ import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.Virtualizer
 import android.media.audiofx.Visualizer
+import androidx.core.content.ContextCompat
 import com.example.core.database.AudioPresetEntity
 import com.example.core.database.MyatoDatabase
 import com.example.domain.models.AudioEqualizerState
@@ -42,12 +45,18 @@ class EqualizerEngine(
     private var loudnessEnhancer: LoudnessEnhancer? = null
     private var visualizer: Visualizer? = null
     private var attachedSessionId: Int = 0
+    private var isForegroundActive: Boolean = true
+    private var isVisualizerUserEnabled: Boolean = true
+    private val reusableFftMagnitudes = FloatArray(16)
 
     private val _state = MutableStateFlow(AudioEqualizerState())
     val state: StateFlow<AudioEqualizerState> = _state.asStateFlow()
 
     private val _spectrumBars = MutableStateFlow(List(16) { 0f })
     val spectrumBars: StateFlow<List<Float>> = _spectrumBars.asStateFlow()
+
+    private val _hasRealFftSignal = MutableStateFlow(false)
+    val hasRealFftSignal: StateFlow<Boolean> = _hasRealFftSignal.asStateFlow()
 
     private val _savedPresets = MutableStateFlow<List<AudioPresetEntity>>(emptyList())
     val savedPresets: StateFlow<List<AudioPresetEntity>> = _savedPresets.asStateFlow()
@@ -127,7 +136,18 @@ class EqualizerEngine(
     }
 
     fun startVisualizerIfPermitted() {
-        if (attachedSessionId <= 0 || visualizer != null) return
+        isVisualizerUserEnabled = true
+        if (!isForegroundActive || attachedSessionId <= 0) return
+        val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!hasPerm) {
+            _hasRealFftSignal.value = false
+            return
+        }
+        if (visualizer != null) {
+            runCatching { visualizer?.enabled = true }
+            return
+        }
         runCatching {
             val viz = Visualizer(attachedSessionId).apply {
                 captureSize = Visualizer.getCaptureSizeRange()[1].coerceAtMost(256)
@@ -135,17 +155,19 @@ class EqualizerEngine(
                     object : Visualizer.OnDataCaptureListener {
                         override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
                         override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, samplingRate: Int) {
-                            if (fft == null || fft.size < 4) return
-                            val bars = MutableList(16) { 0f }
-                            val step = (fft.size / 2) / 16
+                            if (fft == null || fft.size < 4 || !isForegroundActive) return
+                            val step = ((fft.size / 2) / 16).coerceAtLeast(1)
+                            var hasSignal = false
                             for (i in 0 until 16) {
                                 val idx = (i * step * 2).coerceIn(0, fft.size - 2)
                                 val re = fft[idx].toFloat()
                                 val im = fft[idx + 1].toFloat()
-                                val mag = kotlin.math.hypot(re, im)
-                                bars[i] = (mag / 96f).coerceIn(0.06f, 1f)
+                                val mag = (kotlin.math.hypot(re, im) / 96f).coerceIn(0f, 1f)
+                                if (mag > 0.04f) hasSignal = true
+                                reusableFftMagnitudes[i] = mag.coerceAtLeast(0.04f)
                             }
-                            _spectrumBars.value = bars
+                            _hasRealFftSignal.value = hasSignal
+                            _spectrumBars.value = reusableFftMagnitudes.toList()
                         }
                     },
                     Visualizer.getMaxCaptureRate() / 2,
@@ -155,15 +177,31 @@ class EqualizerEngine(
                 enabled = true
             }
             visualizer = viz
+        }.onFailure {
+            _hasRealFftSignal.value = false
+        }
+    }
+
+    fun setVisualizerAppForeground(inForeground: Boolean) {
+        if (isForegroundActive == inForeground) return
+        isForegroundActive = inForeground
+        if (!inForeground) {
+            runCatching { visualizer?.enabled = false }
+            _hasRealFftSignal.value = false
+            _spectrumBars.value = List(16) { 0f }
+        } else if (isVisualizerUserEnabled) {
+            startVisualizerIfPermitted()
         }
     }
 
     fun stopVisualizer() {
+        isVisualizerUserEnabled = false
         runCatching {
             visualizer?.enabled = false
             visualizer?.release()
         }
         visualizer = null
+        _hasRealFftSignal.value = false
         _spectrumBars.value = List(16) { 0f }
     }
 

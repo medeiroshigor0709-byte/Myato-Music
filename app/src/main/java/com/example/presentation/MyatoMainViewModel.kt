@@ -38,6 +38,7 @@ import com.example.domain.models.MusicNote
 import com.example.domain.models.MusicTrack
 import com.example.domain.models.MyatoTheme
 import com.example.domain.models.PlaybackQueue
+import com.example.domain.models.PlayerVisualBackgroundStyle
 import com.example.domain.models.Playlist
 import com.example.domain.models.PlaylistAddResult
 import com.example.domain.models.QueueOriginType
@@ -122,6 +123,7 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
     val equalizerState = playbackController.equalizerEngine.state
     val equalizerPresets = playbackController.equalizerEngine.savedPresets
     val spectrumBars = playbackController.equalizerEngine.spectrumBars
+    val hasRealFftSignal = playbackController.equalizerEngine.hasRealFftSignal
     val sleepTimerState = playbackController.sleepTimerManager.state
 
     val audioCapabilities: List<AudioFormatCapability> by lazy { AudioFormatSupport.detectDeviceCapabilities() }
@@ -453,6 +455,26 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch { app.preferencesStore.setPlayerAnimatedTransitions(enabled) }
     }
 
+    fun setPlayerVisualStyle(style: PlayerVisualBackgroundStyle) {
+        viewModelScope.launch { app.preferencesStore.setPlayerVisualStyle(style) }
+    }
+
+    fun setAnimationsDisabled(disabled: Boolean) {
+        viewModelScope.launch { app.preferencesStore.setAnimationsDisabled(disabled) }
+    }
+
+    fun setReduceMotion(reduced: Boolean) {
+        viewModelScope.launch { app.preferencesStore.setReduceMotion(reduced) }
+    }
+
+    fun setReduceEffectsOnLowBattery(enabled: Boolean) {
+        viewModelScope.launch { app.preferencesStore.setReduceEffectsOnLowBattery(enabled) }
+    }
+
+    fun setAppForeground(inForeground: Boolean) {
+        playbackController.equalizerEngine.setVisualizerAppForeground(inForeground)
+    }
+
     fun selectTracksByCriteria(
         allTracksList: List<MusicTrack>,
         criteria: SmartSelectionCriteria,
@@ -744,7 +766,10 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun setBatterySaverAnimations(enabled: Boolean) {
-        viewModelScope.launch { app.preferencesStore.setBatterySaverAnimations(enabled) }
+        viewModelScope.launch {
+            app.preferencesStore.setBatterySaverAnimations(enabled)
+            app.preferencesStore.setReduceMotion(enabled)
+        }
     }
 
     fun setVisualizerEnabled(enabled: Boolean) {
