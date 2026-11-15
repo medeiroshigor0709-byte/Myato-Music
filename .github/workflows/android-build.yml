@@ -23,10 +23,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
@@ -37,25 +37,79 @@ jobs:
         with:
           cmdline-tools-version: "14742923"
           accept-android-sdk-licenses: true
-          packages: |
-            platform-tools
-            build-tools;36.0.0
-            platforms;android-36.1
-            platforms;android-36
+          packages: ""
 
-      - name: Verify Android SDK & Licenses
+      - name: Inspect SDK Catalog & Install Required Android Packages
         run: |
           set -euo pipefail
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
           if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
-            echo "::error::Android SDK root not configured."
+            echo "::error::Neither ANDROID_HOME nor ANDROID_SDK_ROOT points to a valid Android SDK directory."
             exit 1
           fi
+
+          export ANDROID_HOME="$SDK_ROOT"
+          export ANDROID_SDK_ROOT="$SDK_ROOT"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+          echo "=== sdkmanager --version ==="
+          sdkmanager --version
+
+          echo "=== Accepting Android SDK licenses ==="
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+
+          echo "=== Checking remote SDK catalog (sdkmanager --list) ==="
+          CATALOG="$(sdkmanager --list 2>&1)"
+          echo "$CATALOG" | grep -E "platform-tools|platforms;android-36|build-tools;36\.0\.0" || true
+
+          for pkg in "platform-tools" "platforms;android-36" "build-tools;36.0.0"; do
+            if ! printf '%s\n' "$CATALOG" | grep -Eq "^[[:space:]]*${pkg}([[:space:]]|\|)"; then
+              echo "::error::Package '${pkg}' was NOT found in sdkmanager --list remote catalog."
+              echo "=== Full sdkmanager --list output for diagnosis ==="
+              printf '%s\n' "$CATALOG"
+              exit 1
+            fi
+          done
+
+          echo "=== Installing stable Android SDK packages ==="
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Validate Toolchain & Installed SDK Components
+        run: |
+          set -euo pipefail
           echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unset}"
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+
+          if [ -z "${ANDROID_HOME:-}" ] || [ -z "${ANDROID_SDK_ROOT:-}" ] || [ "$ANDROID_HOME" != "$ANDROID_SDK_ROOT" ]; then
+            echo "::error::ANDROID_HOME and ANDROID_SDK_ROOT must both be set and point to the same SDK root."
+            exit 1
+          fi
+
+          for required_path in \
+            "$ANDROID_HOME/platform-tools/adb" \
+            "$ANDROID_HOME/platforms/android-36/android.jar" \
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner"; do
+            if [ ! -e "$required_path" ]; then
+              echo "::error::Missing required SDK component: $required_path"
+              ls -la "$ANDROID_HOME" || true
+              exit 1
+            fi
+          done
+
+          echo "=== java -version ==="
+          java -version
+          echo "=== sdkmanager --version ==="
           sdkmanager --version
-          ls -la "$SDK_ROOT/platforms" "$SDK_ROOT/build-tools"
+          echo "=== sdkmanager --list_installed ==="
+          sdkmanager --list_installed
+          echo "=== adb version ==="
+          adb version
+
+          chmod +x gradlew
+          echo "=== ./gradlew --version ==="
+          ./gradlew --version
 
       - name: Ensure debug.keystore is available
         run: |
@@ -79,15 +133,15 @@ jobs:
           fi
           ls -lh debug.keystore
 
-      - name: Grant execute permission for Gradle wrapper
-        run: chmod +x gradlew
+      - name: Clean Gradle Build
+        run: ./gradlew clean --no-daemon
 
       - name: Run Unit & Robolectric Tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon
 
       - name: Upload Test Reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports
           path: app/build/reports/tests/
@@ -106,10 +160,11 @@ jobs:
           fi
           cp "$DEBUG_APK" dist/MYATO-MUSIC-debug.apk
           cp "$DEBUG_APK" dist/MYATO-MUSIC.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose dist/MYATO-MUSIC-debug.apk
           ls -lh dist/
 
       - name: Upload Debug APK Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: MYATO-MUSIC-debug-apk
           path: |
@@ -168,13 +223,7 @@ jobs:
             exit 1
           fi
 
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          APKSIGNER="$(find "$SDK_ROOT/build-tools" -name apksigner | sort -V | tail -n 1)"
-          if [ -z "$APKSIGNER" ]; then
-            echo "::error::apksigner not found in $SDK_ROOT/build-tools"
-            exit 1
-          fi
-
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           mkdir -p dist
           cp "$RELEASE_APK" dist/MYATO-MUSIC-release.apk
           "$APKSIGNER" sign \
@@ -190,7 +239,7 @@ jobs:
 
       - name: Upload Signed Release APK Artifact
         if: steps.release_build.outputs.has_release == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: MYATO-MUSIC-release-apk
           path: dist/MYATO-MUSIC-release.apk
@@ -206,7 +255,7 @@ jobs:
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v') && steps.release_build.outputs.has_release == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: MYATO MUSIC ${{ github.ref_name }}
           generate_release_notes: true

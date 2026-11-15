@@ -96,7 +96,7 @@ O GitHub Actions executará os testes (`testDebugUnitTest`), compilará e assina
 
 ## Compilação Local
 
-Requisitos: JDK 21 (ou JDK 17+) e Android SDK (`platforms;android-36.1`, `build-tools;36.0.0`).
+Requisitos: JDK 21 (ou JDK 17+) e Android SDK (`platforms;android-36`, `build-tools;36.0.0`, `platform-tools`).
 
 ```bash
 ./gradlew :app:testDebugUnitTest
