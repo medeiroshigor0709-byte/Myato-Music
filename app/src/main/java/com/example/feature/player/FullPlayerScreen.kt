@@ -1,5 +1,6 @@
 package com.example.feature.player
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -52,6 +53,7 @@ import androidx.compose.material.icons.rounded.Replay10
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -69,6 +71,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -81,6 +84,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -90,18 +94,26 @@ import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.core.audio.PlaybackUiState
 import com.example.core.common.TimeFormatter
+import com.example.core.designsystem.AlbumArtPaletteExtractor
 import com.example.core.designsystem.AlbumArtwork
-import com.example.core.designsystem.FrequencyBarsVisualizer
+import com.example.core.designsystem.BuiltInThemes
 import com.example.core.designsystem.LocalMyatoColors
 import com.example.domain.models.AnimationMode
 import com.example.domain.models.Bookmark
+import com.example.domain.models.ListeningStatsSummary
 import com.example.domain.models.MusicNote
+import com.example.domain.models.MusicTrack
 import com.example.domain.models.PlayerAppearance
 import com.example.domain.models.RepeatMode as MyatoRepeatMode
 
 /**
- * 13. Full Player Screen — Cinematic artwork, frequency visualizer, interactive progress,
- * shuffle, repeat, favorites, volume control, bookmarks, notes, queue, lyrics, EQ, and timer links.
+ * 13. Full Player Screen — Cinematic artwork, dynamic ambient backdrop, interactive progress,
+ * primary playback controls, secondary tools, and fully expanded lower panel featuring:
+ * 1. Animated Audio Visualizer (bass/mid/treble, animated response)
+ * 2. Upcoming Tracks Queue Preview (with direct play, reorder, remove, clear)
+ * 3. Compact Synchronized Lyrics (current line highlighted, click to seek, full view)
+ * 4. Detailed Track Metadata & Audio Specs (codec, bitrate, sample rate, size, path, etc.)
+ * 5. Playback Statistics & Library Overview (plays, rank, listening time)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -111,6 +123,15 @@ fun FullPlayerScreen(
     visualizerEnabled: Boolean,
     bookmarks: List<Bookmark>,
     note: MusicNote?,
+    allTracks: List<MusicTrack> = emptyList(),
+    statsSummary: ListeningStatsSummary = ListeningStatsSummary(),
+    visualizerStyle: String = "BARS",
+    animationIntensity: Float = 1.0f,
+    particlesEnabled: Boolean = true,
+    ambientBgEnabled: Boolean = true,
+    showStatsEnabled: Boolean = true,
+    queueVisibleCount: Int = 4,
+    animatedTransitions: Boolean = true,
     onClose: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -127,17 +148,32 @@ fun FullPlayerScreen(
     onOpenEqualizer: () -> Unit,
     onOpenSleepTimer: () -> Unit,
     onOpenTagEditor: (Long) -> Unit,
+    onOpenStats: () -> Unit = {},
+    onPlayQueueIndex: (Int) -> Unit = {},
+    onRemoveFromQueue: (Int) -> Unit = {},
+    onMoveQueueTrack: (Int, Int) -> Unit = { _, _ -> },
+    onClearQueue: () -> Unit = {},
     onAddBookmark: (Long, String, Long) -> Unit,
     onDeleteBookmark: (Long) -> Unit,
     onSaveNote: (Long, String) -> Unit,
     onDeleteNote: (Long) -> Unit,
+    onSetVisualizerEnabled: (Boolean) -> Unit = {},
+    onSetVisualizerStyle: (String) -> Unit = {},
+    onSetAnimationIntensity: (Float) -> Unit = {},
+    onSetParticlesEnabled: (Boolean) -> Unit = {},
+    onSetAmbientBgEnabled: (Boolean) -> Unit = {},
+    onSetShowStatsEnabled: (Boolean) -> Unit = {},
+    onSetQueueCount: (Int) -> Unit = {},
+    onSetAnimatedTransitions: (Boolean) -> Unit = {},
 ) {
     val colors = LocalMyatoColors.current
+    val context = LocalContext.current
     val track = playbackState.currentTrack
     var isSeeking by remember { mutableStateOf(false) }
     var sliderDragPos by remember { mutableFloatStateOf(0f) }
     var showBookmarksSheet by remember { mutableStateOf(false) }
     var showNoteSheet by remember { mutableStateOf(false) }
+    var showPlayerSettingsSheet by remember { mutableStateOf(false) }
 
     val duration = playbackState.durationMs.coerceAtLeast(1L)
     val effectiveProgress = if (isSeeking) sliderDragPos else {
@@ -161,22 +197,54 @@ fun FullPlayerScreen(
         label = "vinyl_angle",
     )
 
+    // Dynamic ambient lighting extracted from album artwork
+    var ambientAccentColor by remember { mutableStateOf(colors.primary) }
+
+    LaunchedEffect(track?.id, ambientBgEnabled) {
+        if (ambientBgEnabled && track != null) {
+            val extracted = AlbumArtPaletteExtractor.extractThemeFromTrack(
+                context = context,
+                artUri = track.albumArtUri,
+                filePath = track.filePath,
+                baseTheme = BuiltInThemes.MidnightOrange,
+            )
+            ambientAccentColor = Color(extracted.primaryColorHex)
+        } else {
+            ambientAccentColor = colors.primary
+        }
+    }
+
+    val animatedAccent by animateColorAsState(
+        targetValue = ambientAccentColor,
+        animationSpec = tween(durationMillis = if (animatedTransitions) 600 else 0),
+        label = "ambient_accent",
+    )
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        colors.primary.copy(alpha = 0.24f),
+                        animatedAccent.copy(alpha = 0.22f),
                         colors.altBackground,
                         colors.background,
-                    )
-                )
+                    ),
+                ),
             )
             .safeDrawingPadding()
             .testTag("full_player_screen"),
         contentAlignment = Alignment.TopCenter,
     ) {
+        // Optional subtle floating sparkles
+        if (particlesEnabled) {
+            FloatingAmbientParticles(
+                isPlaying = playbackState.isPlaying,
+                particleColor = animatedAccent,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
         Column(
             modifier = Modifier
                 .widthIn(max = 600.dp)
@@ -185,7 +253,7 @@ fun FullPlayerScreen(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Top bar
+            // Top Bar
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -203,12 +271,20 @@ fun FullPlayerScreen(
                         maxLines = 1,
                     )
                 }
-                IconButton(onClick = onOpenQueue, modifier = Modifier.minimumInteractiveComponentSize()) {
-                    Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = stringResource(R.string.cd_queue), tint = colors.textPrimary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { showPlayerSettingsSheet = true },
+                        modifier = Modifier.minimumInteractiveComponentSize(),
+                    ) {
+                        Icon(Icons.Rounded.Tune, contentDescription = "Ajustes do Player", tint = colors.textSecondary)
+                    }
+                    IconButton(onClick = onOpenQueue, modifier = Modifier.minimumInteractiveComponentSize()) {
+                        Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = stringResource(R.string.cd_queue), tint = colors.textPrimary)
+                    }
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(14.dp))
 
             // Artwork Showcase
             val rotateMod = if (
@@ -219,7 +295,7 @@ fun FullPlayerScreen(
                 Modifier.rotate(spinAngle)
             } else Modifier
 
-            val coverSize = if (colors.playerAppearance == PlayerAppearance.COMPACT) 200.dp else 272.dp
+            val coverSize = if (colors.playerAppearance == PlayerAppearance.COMPACT) 200.dp else 268.dp
             AlbumArtwork(
                 artUri = track?.albumArtUri,
                 size = coverSize,
@@ -229,20 +305,7 @@ fun FullPlayerScreen(
                     .then(rotateMod),
             )
 
-            Spacer(Modifier.height(14.dp))
-
-            // Frequency Visualizer
-            if (visualizerEnabled) {
-                FrequencyBarsVisualizer(
-                    bars = spectrumBars,
-                    isPlaying = playbackState.isPlaying,
-                    modifier = Modifier
-                        .fillMaxWidth(0.75f)
-                        .height(34.dp),
-                )
-            }
-
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(16.dp))
 
             // Title, Artist & Favorite
             Row(
@@ -329,6 +392,7 @@ fun FullPlayerScreen(
                     text = track?.formatExtension ?: "--",
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.primary,
+                    fontWeight = FontWeight.Bold,
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onSeekForward10s, modifier = Modifier.minimumInteractiveComponentSize()) {
@@ -344,7 +408,7 @@ fun FullPlayerScreen(
 
             Spacer(Modifier.height(10.dp))
 
-            // Primary Playback Controls (5 controls fit cleanly on all screen widths)
+            // Primary Playback Controls
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -424,6 +488,68 @@ fun FullPlayerScreen(
                 PlayerActionPill(Icons.Rounded.Bedtime, "Timer", onOpenSleepTimer)
                 PlayerActionPill(Icons.Rounded.Edit, "Tags") { track?.let { onOpenTagEditor(it.id) } }
             }
+
+            Spacer(Modifier.height(16.dp))
+
+            // =========================================================================
+            // NOVA ÁREA INFERIOR — PAINEL COMPLETO FIXO
+            // =========================================================================
+
+            // 1. VISUALIZADOR DE ÁUDIO ANIMADO (Graves, Médios, Agudos, adaptativo ao volume)
+            if (visualizerEnabled) {
+                AnimatedAudioVisualizerSection(
+                    spectrumBars = spectrumBars,
+                    isPlaying = playbackState.isPlaying,
+                    style = visualizerStyle,
+                    intensity = animationIntensity,
+                    volumeFraction = playbackState.volumeFraction,
+                    onOpenSettings = { showPlayerSettingsSheet = true },
+                )
+                Spacer(Modifier.height(10.dp))
+            }
+
+            // 2. PRÓXIMAS MÚSICAS — FILA DE REPRODUÇÃO (3 a 5 músicas com tocar, reordenar, remover)
+            UpcomingQueueSection(
+                playbackState = playbackState,
+                visibleCount = queueVisibleCount,
+                onOpenFullQueue = onOpenQueue,
+                onPlayTrackAtIndex = onPlayQueueIndex,
+                onRemoveTrack = onRemoveFromQueue,
+                onMoveTrack = onMoveQueueTrack,
+                onClearQueue = onClearQueue,
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            // 3. LETRAS DA MÚSICA (Prévia sincronizada com verso atual em destaque)
+            LyricsPreviewSection(
+                track = track,
+                positionMs = playbackState.positionMs,
+                onOpenFullLyrics = onOpenLyrics,
+                onSeekTo = onSeekTo,
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            // 4. INFORMAÇÕES DETALHADAS DA MÚSICA (Metadados técnicos reais do arquivo)
+            TrackDetailsSection(
+                track = track,
+                onOpenTagEditor = onOpenTagEditor,
+            )
+
+            // 5. ESTATÍSTICAS DE REPRODUÇÃO (Desta música e da biblioteca)
+            if (showStatsEnabled) {
+                Spacer(Modifier.height(10.dp))
+                PlaybackStatsSection(
+                    track = track,
+                    allTracks = allTracks,
+                    statsSummary = statsSummary,
+                    onOpenFullStats = onOpenStats,
+                )
+            }
+
+            // Space to ensure contents do not get clipped behind system navigation
+            Spacer(Modifier.height(36.dp))
         }
     }
 
@@ -507,6 +633,28 @@ fun FullPlayerScreen(
                 }
             }
         }
+    }
+
+    if (showPlayerSettingsSheet) {
+        PlayerSettingsSheet(
+            visualizerEnabled = visualizerEnabled,
+            visualizerStyle = visualizerStyle,
+            animationIntensity = animationIntensity,
+            particlesEnabled = particlesEnabled,
+            ambientBgEnabled = ambientBgEnabled,
+            showStatsEnabled = showStatsEnabled,
+            queueCount = queueVisibleCount,
+            animatedTransitions = animatedTransitions,
+            onDismiss = { showPlayerSettingsSheet = false },
+            onSetVisualizerEnabled = onSetVisualizerEnabled,
+            onSetVisualizerStyle = onSetVisualizerStyle,
+            onSetAnimationIntensity = onSetAnimationIntensity,
+            onSetParticlesEnabled = onSetParticlesEnabled,
+            onSetAmbientBgEnabled = onSetAmbientBgEnabled,
+            onSetShowStatsEnabled = onSetShowStatsEnabled,
+            onSetQueueCount = onSetQueueCount,
+            onSetAnimatedTransitions = onSetAnimatedTransitions,
+        )
     }
 }
 

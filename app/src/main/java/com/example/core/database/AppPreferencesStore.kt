@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -38,6 +39,13 @@ data class AppUserPreferences(
     val autoBackupDirectoryUri: String = "",
     val savedSortOrder: TrackSortOrder = TrackSortOrder.TITLE_ASC,
     val savedFormatFilter: String = "Todas",
+    val visualizerStyle: String = "BARS", // BARS, WAVE, PEAKS
+    val visualizerAnimationIntensity: Float = 1.0f, // 0.5f = Suave, 1.0f = Normal, 1.5f = Intensa
+    val playerParticlesEnabled: Boolean = true,
+    val playerAmbientBackgroundEnabled: Boolean = true,
+    val playerShowStats: Boolean = true,
+    val playerQueueVisibleCount: Int = 4, // 3..5
+    val playerAnimatedTransitions: Boolean = true,
 )
 
 class AppPreferencesStore(private val context: Context) {
@@ -62,6 +70,13 @@ class AppPreferencesStore(private val context: Context) {
         val AUTO_BACKUP_URI = stringPreferencesKey("auto_backup_uri")
         val LIBRARY_SORT_ORDER = stringPreferencesKey("library_sort_order")
         val LIBRARY_FORMAT_FILTER = stringPreferencesKey("library_format_filter")
+        val VISUALIZER_STYLE = stringPreferencesKey("visualizer_style")
+        val VISUALIZER_INTENSITY = floatPreferencesKey("visualizer_intensity")
+        val PLAYER_PARTICLES = booleanPreferencesKey("player_particles")
+        val PLAYER_AMBIENT_BG = booleanPreferencesKey("player_ambient_bg")
+        val PLAYER_SHOW_STATS = booleanPreferencesKey("player_show_stats")
+        val PLAYER_QUEUE_COUNT = intPreferencesKey("player_queue_count")
+        val PLAYER_ANIM_TRANSITIONS = booleanPreferencesKey("player_anim_transitions")
     }
 
     val preferencesFlow: Flow<AppUserPreferences> = context.myatoDataStore.data.map { prefs ->
@@ -85,6 +100,13 @@ class AppPreferencesStore(private val context: Context) {
             autoBackupDirectoryUri = prefs[Keys.AUTO_BACKUP_URI] ?: "",
             savedSortOrder = parseSortOrder(prefs[Keys.LIBRARY_SORT_ORDER]),
             savedFormatFilter = prefs[Keys.LIBRARY_FORMAT_FILTER] ?: "Todas",
+            visualizerStyle = prefs[Keys.VISUALIZER_STYLE] ?: "BARS",
+            visualizerAnimationIntensity = prefs[Keys.VISUALIZER_INTENSITY] ?: 1.0f,
+            playerParticlesEnabled = prefs[Keys.PLAYER_PARTICLES] ?: true,
+            playerAmbientBackgroundEnabled = prefs[Keys.PLAYER_AMBIENT_BG] ?: true,
+            playerShowStats = prefs[Keys.PLAYER_SHOW_STATS] ?: true,
+            playerQueueVisibleCount = prefs[Keys.PLAYER_QUEUE_COUNT] ?: 4,
+            playerAnimatedTransitions = prefs[Keys.PLAYER_ANIM_TRANSITIONS] ?: true,
         )
     }
 
@@ -165,6 +187,48 @@ class AppPreferencesStore(private val context: Context) {
     suspend fun setLibraryFormatFilter(format: String) {
         context.myatoDataStore.edit {
             it[Keys.LIBRARY_FORMAT_FILTER] = format
+        }
+    }
+
+    suspend fun setVisualizerStyle(style: String) {
+        context.myatoDataStore.edit {
+            it[Keys.VISUALIZER_STYLE] = style
+        }
+    }
+
+    suspend fun setVisualizerAnimationIntensity(intensity: Float) {
+        context.myatoDataStore.edit {
+            it[Keys.VISUALIZER_INTENSITY] = intensity
+        }
+    }
+
+    suspend fun setPlayerParticlesEnabled(enabled: Boolean) {
+        context.myatoDataStore.edit {
+            it[Keys.PLAYER_PARTICLES] = enabled
+        }
+    }
+
+    suspend fun setPlayerAmbientBackgroundEnabled(enabled: Boolean) {
+        context.myatoDataStore.edit {
+            it[Keys.PLAYER_AMBIENT_BG] = enabled
+        }
+    }
+
+    suspend fun setPlayerShowStats(enabled: Boolean) {
+        context.myatoDataStore.edit {
+            it[Keys.PLAYER_SHOW_STATS] = enabled
+        }
+    }
+
+    suspend fun setPlayerQueueVisibleCount(count: Int) {
+        context.myatoDataStore.edit {
+            it[Keys.PLAYER_QUEUE_COUNT] = count.coerceIn(3, 5)
+        }
+    }
+
+    suspend fun setPlayerAnimatedTransitions(enabled: Boolean) {
+        context.myatoDataStore.edit {
+            it[Keys.PLAYER_ANIM_TRANSITIONS] = enabled
         }
     }
 }

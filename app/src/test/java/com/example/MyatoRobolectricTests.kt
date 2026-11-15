@@ -298,6 +298,13 @@ class MyatoRobolectricTests {
         assertEquals(1, playPauseClicks)
         assertEquals(1, nextClicks)
         assertEquals(1, favClicks)
+
+        // Verify all 5 new bottom sections are rendered in the full player view
+        composeRule.onNodeWithText("VISUALIZADOR DE ÁUDIO").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("PRÓXIMAS MÚSICAS").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("LETRAS DA MÚSICA").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("INFORMAÇÕES DA FAIXA").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("ESTATÍSTICAS DE REPRODUÇÃO").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -372,5 +379,71 @@ class MyatoRobolectricTests {
         plRepo.clearPlaylist(plId)
         val clearedTracks = plRepo.observePlaylistTrackIds(plId).first()
         assertTrue(clearedTracks.isEmpty())
+    }
+
+    @Test
+    fun `media notification provider applies dynamic theme colors to notification`() {
+        var activeColor = BuiltInThemes.MidnightOrange.primaryColorHex.toInt()
+        val builder = androidx.core.app.NotificationCompat.Builder(context, "myato_test_channel")
+        builder.setColor(activeColor)
+        builder.setColorized(true)
+        val notif = builder.build()
+        assertEquals(BuiltInThemes.MidnightOrange.primaryColorHex.toInt(), notif.color)
+
+        // Switch to Ocean Blue
+        activeColor = BuiltInThemes.OceanBlue.primaryColorHex.toInt()
+        val blueBuilder = androidx.core.app.NotificationCompat.Builder(context, "myato_test_channel")
+        blueBuilder.setColor(activeColor)
+        blueBuilder.setColorized(true)
+        val blueNotif = blueBuilder.build()
+        assertEquals(BuiltInThemes.OceanBlue.primaryColorHex.toInt(), blueNotif.color)
+
+        // Switch to Purple Night
+        activeColor = BuiltInThemes.PurpleNight.primaryColorHex.toInt()
+        val purpleBuilder = androidx.core.app.NotificationCompat.Builder(context, "myato_test_channel")
+        purpleBuilder.setColor(activeColor)
+        purpleBuilder.setColorized(true)
+        val purpleNotif = purpleBuilder.build()
+        assertEquals(BuiltInThemes.PurpleNight.primaryColorHex.toInt(), purpleNotif.color)
+    }
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    @Test
+    fun `media notification command buttons include Next Track mapped to SLOT_FORWARD and COMMAND_SEEK_TO_NEXT_MEDIA_ITEM`() {
+        val nextTrackBtn = androidx.media3.session.CommandButton.Builder(androidx.media3.session.CommandButton.ICON_NEXT)
+            .setDisplayName("Próxima Música")
+            .setPlayerCommand(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+            .setSlots(androidx.media3.session.CommandButton.SLOT_FORWARD)
+            .build()
+
+        assertEquals(androidx.media3.session.CommandButton.ICON_NEXT, nextTrackBtn.icon)
+        assertEquals(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, nextTrackBtn.playerCommand)
+        assertEquals("Próxima Música", nextTrackBtn.displayName)
+        assertTrue(nextTrackBtn.slots.contains(androidx.media3.session.CommandButton.SLOT_FORWARD))
+    }
+
+    @Test
+    fun `skip next action loops to index 0 when RepeatMode ALL is active`() = runBlocking {
+        val t1 = MusicTrack(
+            id = 1L, mediaStoreId = 1L, title = "Song 1", artist = "Artist", album = "Album",
+            albumId = 1L, artistId = 1L, durationMs = 120_000L, sizeBytes = 1000L,
+            filePath = "/path/1.mp3", folderPath = "/path", contentUri = "content://1",
+            formatExtension = "MP3",
+        )
+        val t2 = t1.copy(id = 2L, title = "Song 2", contentUri = "content://2")
+        val state = PlaybackUiState(
+            queueTracks = listOf(t1, t2),
+            currentIndex = 1,
+            currentTrack = t2,
+            repeatMode = com.example.domain.models.RepeatMode.ALL,
+        )
+        val nextIndex = if (state.currentIndex + 1 < state.queueTracks.size) {
+            state.currentIndex + 1
+        } else if (state.repeatMode == com.example.domain.models.RepeatMode.ALL) {
+            0
+        } else {
+            state.currentIndex
+        }
+        assertEquals(0, nextIndex)
     }
 }

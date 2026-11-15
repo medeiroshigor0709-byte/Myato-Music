@@ -421,6 +421,34 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun setVisualizerStyle(style: String) {
+        viewModelScope.launch { app.preferencesStore.setVisualizerStyle(style) }
+    }
+
+    fun setVisualizerAnimationIntensity(intensity: Float) {
+        viewModelScope.launch { app.preferencesStore.setVisualizerAnimationIntensity(intensity) }
+    }
+
+    fun setPlayerParticlesEnabled(enabled: Boolean) {
+        viewModelScope.launch { app.preferencesStore.setPlayerParticlesEnabled(enabled) }
+    }
+
+    fun setPlayerAmbientBackgroundEnabled(enabled: Boolean) {
+        viewModelScope.launch { app.preferencesStore.setPlayerAmbientBackgroundEnabled(enabled) }
+    }
+
+    fun setPlayerShowStats(enabled: Boolean) {
+        viewModelScope.launch { app.preferencesStore.setPlayerShowStats(enabled) }
+    }
+
+    fun setPlayerQueueVisibleCount(count: Int) {
+        viewModelScope.launch { app.preferencesStore.setPlayerQueueVisibleCount(count) }
+    }
+
+    fun setPlayerAnimatedTransitions(enabled: Boolean) {
+        viewModelScope.launch { app.preferencesStore.setPlayerAnimatedTransitions(enabled) }
+    }
+
     fun selectTracksByCriteria(
         allTracksList: List<MusicTrack>,
         criteria: SmartSelectionCriteria,

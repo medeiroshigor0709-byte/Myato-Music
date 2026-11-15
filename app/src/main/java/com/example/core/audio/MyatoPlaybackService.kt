@@ -1,13 +1,16 @@
 package com.example.core.audio
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.KeyEvent
 import androidx.annotation.OptIn
+import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -16,8 +19,10 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
@@ -25,6 +30,7 @@ import com.example.MainActivity
 import com.example.R
 import com.example.core.database.AppPreferencesStore
 import com.example.core.database.MyatoDatabase
+import com.example.core.designsystem.BuiltInThemes
 import com.example.domain.models.HeadsetButtonMapping
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
@@ -37,10 +43,34 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
+ * Custom MediaNotification provider tinting notification and lockscreen media player
+ * with the active MYATO MUSIC dynamic theme color.
+ */
+@OptIn(UnstableApi::class)
+class MyatoNotificationProvider(
+    context: Context,
+    private val themeColorProvider: () -> Int,
+) : DefaultMediaNotificationProvider(context) {
+
+    override fun addNotificationActions(
+        mediaSession: MediaSession,
+        mediaButtons: ImmutableList<CommandButton>,
+        builder: NotificationCompat.Builder,
+        actionFactory: MediaNotification.ActionFactory,
+    ): IntArray {
+        val indices = super.addNotificationActions(mediaSession, mediaButtons, builder, actionFactory)
+        val activeColor = themeColorProvider()
+        builder.setColor(activeColor)
+        builder.setColorized(true)
+        return indices
+    }
+}
+
+/**
  * Media3 MediaLibraryService providing:
  * - Real ExoPlayer gapless playback & background ForegroundService
  * - AudioFocus + AudioBecomingNoisy interruption recovery
- * - MediaSession for lockscreen controls & notification actions (including Add/Remove Playlist action)
+ * - MediaSession for lockscreen controls & notification actions (Next track, Prev track, Seek 10s, Playlist, Favorite)
  * - Headset multi-click hardware button detection (1x, 2x, 3x, 4x+)
  * - Android Auto browsable media tree (Songs, Albums, Artists, Folders, Playlists, Queues)
  */
@@ -52,6 +82,13 @@ class MyatoPlaybackService : MediaLibraryService() {
     private lateinit var preferencesStore: AppPreferencesStore
     private lateinit var player: ExoPlayer
     private var mediaLibrarySession: MediaLibrarySession? = null
+
+    @Volatile
+    private var lastSkipNextTimeMs: Long = 0L
+    @Volatile
+    private var lastSkipPrevTimeMs: Long = 0L
+    @Volatile
+    private var currentThemePrimaryColor: Int = BuiltInThemes.MidnightOrange.primaryColorHex.toInt()
 
     private var clickCount = 0
     private val clickHandler = Handler(Looper.getMainLooper())
@@ -70,17 +107,24 @@ class MyatoPlaybackService : MediaLibraryService() {
         const val NODE_PLAYLISTS = "myato_playlists"
         const val NODE_QUEUES = "myato_queues"
 
+        const val CMD_SKIP_NEXT = "com.example.myato.CMD_SKIP_NEXT"
+        const val CMD_SKIP_PREV = "com.example.myato.CMD_SKIP_PREV"
         const val CMD_SEEK_BACK = "com.example.myato.CMD_SEEK_BACK"
         const val CMD_SEEK_FORWARD = "com.example.myato.CMD_SEEK_FORWARD"
         const val CMD_TOGGLE_FAVORITE = "com.example.myato.CMD_TOGGLE_FAVORITE"
         const val CMD_ADD_TO_PLAYLIST = "com.example.myato.CMD_ADD_TO_PLAYLIST"
         const val EXTRA_OPEN_PLAYER = "extra_open_player"
+        const val SKIP_DEBOUNCE_THRESHOLD_MS = 350L
     }
 
     override fun onCreate() {
         super.onCreate()
         database = MyatoDatabase.getInstance(this)
         preferencesStore = AppPreferencesStore(this)
+
+        setMediaNotificationProvider(
+            MyatoNotificationProvider(this) { currentThemePrimaryColor }
+        )
 
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
@@ -113,33 +157,79 @@ class MyatoPlaybackService : MediaLibraryService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
+        // Standard Next & Previous track buttons with native slots for Android Media Controls
+        val prevTrackBtn = CommandButton.Builder(CommandButton.ICON_PREVIOUS)
+            .setDisplayName("Música Anterior")
+            .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+            .setSlots(CommandButton.SLOT_BACK)
+            .build()
+
+        val nextTrackBtn = CommandButton.Builder(CommandButton.ICON_NEXT)
+            .setDisplayName("Próxima Música")
+            .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+            .setSlots(CommandButton.SLOT_FORWARD)
+            .build()
+
         val seekBackBtn = CommandButton.Builder(CommandButton.ICON_SKIP_BACK_10)
             .setDisplayName("Retroceder 10s")
             .setSessionCommand(SessionCommand(CMD_SEEK_BACK, Bundle.EMPTY))
+            .setSlots(CommandButton.SLOT_BACK_SECONDARY)
             .build()
 
         val seekFwdBtn = CommandButton.Builder(CommandButton.ICON_SKIP_FORWARD_10)
             .setDisplayName("Avançar 10s")
             .setSessionCommand(SessionCommand(CMD_SEEK_FORWARD, Bundle.EMPTY))
+            .setSlots(CommandButton.SLOT_FORWARD_SECONDARY)
             .build()
 
         val playlistBtn = CommandButton.Builder(CommandButton.ICON_PLAYLIST_ADD)
             .setDisplayName("Adicionar/Remover Playlist")
             .setSessionCommand(SessionCommand(CMD_ADD_TO_PLAYLIST, Bundle.EMPTY))
+            .setSlots(CommandButton.SLOT_OVERFLOW)
             .build()
 
         val favoriteBtn = CommandButton.Builder(CommandButton.ICON_HEART_UNFILLED)
             .setDisplayName("Favoritar")
             .setSessionCommand(SessionCommand(CMD_TOGGLE_FAVORITE, Bundle.EMPTY))
+            .setSlots(CommandButton.SLOT_OVERFLOW)
             .build()
+
+        val mediaButtons = listOf(
+            prevTrackBtn,
+            nextTrackBtn,
+            seekBackBtn,
+            seekFwdBtn,
+            playlistBtn,
+            favoriteBtn,
+        )
 
         mediaLibrarySession = MediaLibrarySession.Builder(this, player, LibrarySessionCallback())
             .setSessionActivity(sessionActivityIntent)
-            .setMediaButtonPreferences(listOf(seekBackBtn, seekFwdBtn, playlistBtn, favoriteBtn))
+            .setMediaButtonPreferences(mediaButtons)
+            .setCustomLayout(mediaButtons)
             .build()
 
         PlaybackControllerHolder.getOrNull(applicationContext)
             ?.onExoAudioSessionIdChanged(player.audioSessionId)
+
+        // Observe theme changes dynamically to update notification accent color in real time without app restart
+        serviceScope.launch {
+            preferencesStore.preferencesFlow.collect { prefs ->
+                val builtIn = BuiltInThemes.all.find { it.id == prefs.activeThemeId }
+                val colorHex = builtIn?.primaryColorHex
+                    ?: database.themeDao().getThemeById(prefs.activeThemeId)?.primaryColorHex
+                    ?: BuiltInThemes.MidnightOrange.primaryColorHex
+                val resolvedColor = colorHex.toInt()
+                if (resolvedColor != currentThemePrimaryColor) {
+                    currentThemePrimaryColor = resolvedColor
+                    mediaLibrarySession?.let { session ->
+                        launch(Dispatchers.Main) {
+                            onUpdateNotification(session, isPlaybackOngoing)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
@@ -164,6 +254,47 @@ class MyatoPlaybackService : MediaLibraryService() {
         super.onDestroy()
     }
 
+    fun skipToNextTrack(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastSkipNextTimeMs < SKIP_DEBOUNCE_THRESHOLD_MS) {
+            return false // Debounced duplicate press
+        }
+        lastSkipNextTimeMs = now
+
+        return if (player.hasNextMediaItem()) {
+            player.seekToNextMediaItem()
+            true
+        } else if (player.repeatMode == Player.REPEAT_MODE_ALL && player.mediaItemCount > 0) {
+            player.seekToDefaultPosition(0)
+            true
+        } else {
+            // End of queue: respect queue termination boundary
+            false
+        }
+    }
+
+    fun skipToPreviousTrack(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastSkipPrevTimeMs < SKIP_DEBOUNCE_THRESHOLD_MS) {
+            return false
+        }
+        lastSkipPrevTimeMs = now
+
+        return if (player.currentPosition > 3500L) {
+            player.seekTo(0L)
+            true
+        } else if (player.hasPreviousMediaItem()) {
+            player.seekToPreviousMediaItem()
+            true
+        } else if (player.repeatMode == Player.REPEAT_MODE_ALL && player.mediaItemCount > 0) {
+            player.seekToDefaultPosition(player.mediaItemCount - 1)
+            true
+        } else {
+            player.seekTo(0L)
+            false
+        }
+    }
+
     private fun dispatchHeadsetClicks(clicks: Int) {
         if (clicks <= 0) return
         serviceScope.launch(Dispatchers.Main) {
@@ -178,8 +309,8 @@ class MyatoPlaybackService : MediaLibraryService() {
                 HeadsetButtonMapping.PLAY_PAUSE -> {
                     if (player.isPlaying) player.pause() else player.play()
                 }
-                HeadsetButtonMapping.NEXT_TRACK -> player.seekToNextMediaItem()
-                HeadsetButtonMapping.PREV_TRACK -> player.seekToPreviousMediaItem()
+                HeadsetButtonMapping.NEXT_TRACK -> skipToNextTrack()
+                HeadsetButtonMapping.PREV_TRACK -> skipToPreviousTrack()
                 HeadsetButtonMapping.SEEK_FORWARD -> player.seekForward()
                 HeadsetButtonMapping.SEEK_BACKWARD -> player.seekBack()
                 HeadsetButtonMapping.TOGGLE_FAVORITE -> {
@@ -189,6 +320,7 @@ class MyatoPlaybackService : MediaLibraryService() {
         }
     }
 
+    @Suppress("DEPRECATION")
     private inner class LibrarySessionCallback : MediaLibrarySession.Callback {
 
         override fun onConnect(
@@ -197,14 +329,71 @@ class MyatoPlaybackService : MediaLibraryService() {
         ): MediaSession.ConnectionResult {
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
                 .buildUpon()
+                .add(SessionCommand(CMD_SKIP_NEXT, Bundle.EMPTY))
+                .add(SessionCommand(CMD_SKIP_PREV, Bundle.EMPTY))
                 .add(SessionCommand(CMD_SEEK_BACK, Bundle.EMPTY))
                 .add(SessionCommand(CMD_SEEK_FORWARD, Bundle.EMPTY))
                 .add(SessionCommand(CMD_TOGGLE_FAVORITE, Bundle.EMPTY))
                 .add(SessionCommand(CMD_ADD_TO_PLAYLIST, Bundle.EMPTY))
                 .build()
+
+            val playerCommands = session.player.availableCommands
+                .buildUpon()
+                .add(Player.COMMAND_SEEK_TO_NEXT)
+                .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                .build()
+
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
+                .setAvailablePlayerCommands(playerCommands)
                 .build()
+        }
+
+        override fun onPlayerCommandRequest(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            playerCommand: Int,
+        ): Int {
+            when (playerCommand) {
+                Player.COMMAND_SEEK_TO_NEXT,
+                Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> {
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastSkipNextTimeMs < SKIP_DEBOUNCE_THRESHOLD_MS) {
+                        return SessionResult.RESULT_INFO_SKIPPED // Debounced duplicate press!
+                    }
+                    lastSkipNextTimeMs = now
+
+                    if (!player.hasNextMediaItem() && player.repeatMode == Player.REPEAT_MODE_ALL && player.mediaItemCount > 0) {
+                        player.seekToDefaultPosition(0)
+                        return SessionResult.RESULT_INFO_SKIPPED
+                    }
+                    if (!player.hasNextMediaItem() && player.repeatMode == Player.REPEAT_MODE_OFF) {
+                        return SessionResult.RESULT_INFO_SKIPPED
+                    }
+                    return SessionResult.RESULT_SUCCESS
+                }
+                Player.COMMAND_SEEK_TO_PREVIOUS,
+                Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> {
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastSkipPrevTimeMs < SKIP_DEBOUNCE_THRESHOLD_MS) {
+                        return SessionResult.RESULT_INFO_SKIPPED
+                    }
+                    lastSkipPrevTimeMs = now
+
+                    if (player.currentPosition > 3500L) {
+                        player.seekTo(0L)
+                        return SessionResult.RESULT_INFO_SKIPPED
+                    }
+                    if (!player.hasPreviousMediaItem() && player.repeatMode == Player.REPEAT_MODE_ALL && player.mediaItemCount > 0) {
+                        player.seekToDefaultPosition(player.mediaItemCount - 1)
+                        return SessionResult.RESULT_INFO_SKIPPED
+                    }
+                    return SessionResult.RESULT_SUCCESS
+                }
+            }
+            return super.onPlayerCommandRequest(session, controller, playerCommand)
         }
 
         override fun onMediaButtonEvent(
@@ -213,16 +402,26 @@ class MyatoPlaybackService : MediaLibraryService() {
             intent: Intent,
         ): Boolean {
             val keyEvent = intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
-            if (keyEvent != null &&
-                keyEvent.action == KeyEvent.ACTION_DOWN &&
-                keyEvent.repeatCount == 0 &&
-                (keyEvent.keyCode == KeyEvent.KEYCODE_HEADSETHOOK ||
-                    keyEvent.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
-            ) {
-                clickCount++
-                clickHandler.removeCallbacks(clickResetRunnable)
-                clickHandler.postDelayed(clickResetRunnable, 420L)
-                return true
+            if (keyEvent != null && keyEvent.action == KeyEvent.ACTION_DOWN && keyEvent.repeatCount == 0) {
+                when (keyEvent.keyCode) {
+                    KeyEvent.KEYCODE_HEADSETHOOK,
+                    KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                        clickCount++
+                        clickHandler.removeCallbacks(clickResetRunnable)
+                        clickHandler.postDelayed(clickResetRunnable, 420L)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_MEDIA_NEXT,
+                    KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+                        skipToNextTrack()
+                        return true
+                    }
+                    KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                    KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                        skipToPreviousTrack()
+                        return true
+                    }
+                }
             }
             return super.onMediaButtonEvent(session, controllerInfo, intent)
         }
@@ -234,6 +433,8 @@ class MyatoPlaybackService : MediaLibraryService() {
             args: Bundle,
         ): ListenableFuture<SessionResult> {
             when (customCommand.customAction) {
+                CMD_SKIP_NEXT -> skipToNextTrack()
+                CMD_SKIP_PREV -> skipToPreviousTrack()
                 CMD_SEEK_BACK -> player.seekBack()
                 CMD_SEEK_FORWARD -> player.seekForward()
                 CMD_TOGGLE_FAVORITE -> PlaybackControllerHolder.getOrNull(applicationContext)?.toggleCurrentTrackFavorite()

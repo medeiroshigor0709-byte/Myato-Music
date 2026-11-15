@@ -342,18 +342,22 @@ class PlaybackController(private val context: Context) {
     }
 
     fun skipNext() {
-        mediaController?.let {
-            if (it.hasNextMediaItem()) it.seekToNextMediaItem()
+        val controller = mediaController ?: return
+        if (controller.hasNextMediaItem()) {
+            controller.seekToNextMediaItem()
+        } else if (_playbackState.value.repeatMode == RepeatMode.ALL && controller.mediaItemCount > 0) {
+            controller.seekToDefaultPosition(0)
         }
     }
 
     fun skipPrevious() {
-        mediaController?.let {
-            if (it.currentPosition > 3500L) {
-                it.seekTo(0L)
-            } else if (it.hasPreviousMediaItem()) {
-                it.seekToPreviousMediaItem()
-            }
+        val controller = mediaController ?: return
+        if (controller.currentPosition > 3500L) {
+            controller.seekTo(0L)
+        } else if (controller.hasPreviousMediaItem()) {
+            controller.seekToPreviousMediaItem()
+        } else if (_playbackState.value.repeatMode == RepeatMode.ALL && controller.mediaItemCount > 0) {
+            controller.seekToDefaultPosition((controller.mediaItemCount - 1).coerceAtLeast(0))
         }
     }
 
