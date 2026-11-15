@@ -1,0 +1,29 @@
+<resources>
+    <string name="app_name">MYATO MUSIC</string>
+    <string name="app_slogan">Sua música. Seu estilo. Sua experiência.</string>
+    <string name="nav_home">Início</string>
+    <string name="nav_library">Biblioteca</string>
+    <string name="nav_playlists">Playlists</string>
+    <string name="nav_themes">Temas</string>
+    <string name="nav_settings">Ajustes</string>
+
+    <string name="widget_small_desc">MYATO MUSIC — Mini Widget (Capa, Música, Play/Pause)</string>
+    <string name="widget_medium_desc">MYATO MUSIC — Widget Médio (Capa, Info e Controles)</string>
+    <string name="widget_large_desc">MYATO MUSIC — Widget Completo (Capa, Progresso, Favoritos)</string>
+
+    <string name="cd_album_cover">Capa do álbum</string>
+    <string name="cd_play_pause">Reproduzir ou pausar</string>
+    <string name="cd_next_track">Próxima música</string>
+    <string name="cd_prev_track">Música anterior</string>
+    <string name="cd_shuffle">Reprodução aleatória</string>
+    <string name="cd_repeat">Modo de repetição</string>
+    <string name="cd_favorite">Favoritar música</string>
+    <string name="cd_back">Voltar</string>
+    <string name="cd_search">Buscar</string>
+    <string name="cd_queue">Fila de reprodução</string>
+    <string name="cd_lyrics">Letras</string>
+    <string name="cd_equalizer">Equalizador</string>
+    <string name="cd_more_options">Mais opções</string>
+    <string name="notification_channel_playback">Reprodução de Música</string>
+    <string name="notification_channel_backup">Backup Automático</string>
+</resources>

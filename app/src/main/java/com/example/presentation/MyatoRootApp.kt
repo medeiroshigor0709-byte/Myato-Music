@@ -1,0 +1,695 @@
+package com.example.presentation
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
+import androidx.navigation.NavDestination.Companion.hasRoute
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
+import com.example.core.designsystem.AddToPlaylistsDialog
+import com.example.core.designsystem.BuiltInThemes
+import com.example.core.designsystem.LocalMyatoColors
+import com.example.core.designsystem.MiniPlayerBar
+import com.example.core.designsystem.MyatoMusicTheme
+import com.example.core.designsystem.TrackContextMenuSheet
+import com.example.domain.models.MusicTrack
+import com.example.domain.models.QueueOriginType
+import com.example.feature.equalizer.EqualizerScreen
+import com.example.feature.equalizer.SleepTimerScreen
+import com.example.feature.filemanager.FileManagerScreen
+import com.example.feature.home.HomeScreen
+import com.example.feature.home.OnboardingScreen
+import com.example.feature.home.PermissionsScreen
+import com.example.feature.home.SplashScreen
+import com.example.feature.library.AlbumsScreen
+import com.example.feature.library.AllSongsScreen
+import com.example.feature.library.ArtistsScreen
+import com.example.feature.library.FavoritesScreen
+import com.example.feature.library.FoldersScreen
+import com.example.feature.library.GenresScreen
+import com.example.feature.library.LibraryHubScreen
+import com.example.feature.lyrics.LyricsScreen
+import com.example.feature.lyrics.TagEditorScreen
+import com.example.feature.player.FullPlayerScreen
+import com.example.feature.queues.PlaylistsScreen
+import com.example.feature.queues.QueuesScreen
+import com.example.feature.statistics.AboutScreen
+import com.example.feature.statistics.BackupScreen
+import com.example.feature.statistics.SettingsScreen
+import com.example.feature.statistics.StatisticsScreen
+import com.example.feature.statistics.WidgetsShortcutsScreen
+import com.example.feature.themes.ThemeCenterScreen
+import com.example.feature.themes.ThemeEditorScreen
+import com.example.presentation.navigation.MyatoRoute
+import kotlinx.coroutines.flow.flowOf
+
+private data class TopNavItem(
+    val route: MyatoRoute,
+    val label: String,
+    val icon: ImageVector,
+    val testTag: String,
+)
+
+@Composable
+fun MyatoRootApp(
+    viewModel: MyatoMainViewModel,
+    openPlayerOnStart: Boolean = false,
+    openPlaylistPickerOnStart: Boolean = false,
+) {
+    val activeTheme by viewModel.activeTheme.collectAsState()
+    val allThemes by viewModel.allThemes.collectAsState()
+    val preferences by viewModel.preferences.collectAsState()
+    val tracks by viewModel.tracks.collectAsState()
+    val albums by viewModel.albums.collectAsState()
+    val artists by viewModel.artists.collectAsState()
+    val folders by viewModel.folders.collectAsState()
+    val genres by viewModel.genres.collectAsState()
+    val favorites by viewModel.favoriteTracks.collectAsState()
+    val recentTracks by viewModel.recentlyAddedTracks.collectAsState()
+    val mostPlayed by viewModel.mostPlayedTracks.collectAsState()
+    val playlists by viewModel.playlists.collectAsState()
+    val queues by viewModel.queues.collectAsState()
+    val playbackState by viewModel.playbackState.collectAsState()
+    val eqState by viewModel.equalizerState.collectAsState()
+    val eqPresets by viewModel.equalizerPresets.collectAsState()
+    val spectrumBars by viewModel.spectrumBars.collectAsState()
+    val sleepTimerState by viewModel.sleepTimerState.collectAsState()
+    val statsSummary by viewModel.statsSummary.collectAsState()
+    val backupHistory by viewModel.backupHistory.collectAsState()
+    val previewedBackup by viewModel.previewedBackup.collectAsState()
+    val duplicates by viewModel.duplicates.collectAsState()
+    val isScanning by viewModel.isScanning.collectAsState()
+    val statusMessage by viewModel.statusMessage.collectAsState()
+
+    val currentTrackId = playbackState.currentTrack?.id ?: -1L
+    val currentBookmarks by remember(currentTrackId) {
+        if (currentTrackId != -1L) viewModel.observeBookmarks(currentTrackId) else flowOf(emptyList())
+    }.collectAsState(initial = emptyList())
+    val currentNote by remember(currentTrackId) {
+        if (currentTrackId != -1L) viewModel.observeNote(currentTrackId) else flowOf(null)
+    }.collectAsState(initial = null)
+
+    val navController = rememberNavController()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    var contextMenuTrack by remember { mutableStateOf<MusicTrack?>(null) }
+    var playlistDialogTrackIds by remember { mutableStateOf<List<Long>?>(null) }
+
+    LaunchedEffect(statusMessage) {
+        statusMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearStatusMessage()
+        }
+    }
+
+    LaunchedEffect(openPlayerOnStart, openPlaylistPickerOnStart) {
+        if (openPlaylistPickerOnStart && playbackState.currentTrack != null) {
+            playlistDialogTrackIds = listOf(playbackState.currentTrack!!.id)
+        }
+    }
+
+    MyatoMusicTheme(activeTheme = activeTheme) {
+        val colors = LocalMyatoColors.current
+        val navBackStack by navController.currentBackStackEntryAsState()
+        val currentDestination = navBackStack?.destination
+
+        val isChromeless = currentDestination?.hasRoute<MyatoRoute.Splash>() == true ||
+            currentDestination?.hasRoute<MyatoRoute.Onboarding>() == true ||
+            currentDestination?.hasRoute<MyatoRoute.Permissions>() == true ||
+            currentDestination?.hasRoute<MyatoRoute.FullPlayer>() == true
+
+        val topItems = remember {
+            listOf(
+                TopNavItem(MyatoRoute.Home, "Início", Icons.Rounded.Home, "nav_home"),
+                TopNavItem(MyatoRoute.LibraryHub, "Biblioteca", Icons.Rounded.LibraryMusic, "nav_library"),
+                TopNavItem(MyatoRoute.Playlists, "Playlists", Icons.AutoMirrored.Rounded.QueueMusic, "nav_playlists"),
+                TopNavItem(MyatoRoute.ThemeCenter, "Temas", Icons.Rounded.Palette, "nav_themes"),
+                TopNavItem(MyatoRoute.Settings, "Ajustes", Icons.Rounded.Settings, "nav_settings"),
+            )
+        }
+
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(colors.background),
+        ) {
+            val useRail = !isChromeless && maxWidth >= 600.dp
+
+            Row(modifier = Modifier.fillMaxSize()) {
+                if (useRail) {
+                    NavigationRail(
+                        containerColor = colors.altBackground,
+                        modifier = Modifier.fillMaxHeight(),
+                    ) {
+                        topItems.forEach { item ->
+                            val selected = currentDestination?.hasRoute(item.route::class) == true
+                            NavigationRailItem(
+                                selected = selected,
+                                onClick = {
+                                    navController.navigate(item.route) {
+                                        popUpTo<MyatoRoute.Home> { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
+                                icon = { Icon(item.icon, contentDescription = item.label) },
+                                label = { Text(item.label) },
+                                colors = NavigationRailItemDefaults.colors(
+                                    selectedIconColor = Color.Black,
+                                    selectedTextColor = colors.primary,
+                                    indicatorColor = colors.primary,
+                                    unselectedIconColor = colors.textSecondary,
+                                    unselectedTextColor = colors.textSecondary,
+                                ),
+                                modifier = Modifier.testTag(item.testTag),
+                            )
+                        }
+                    }
+                }
+
+                Scaffold(
+                    containerColor = colors.background,
+                    contentWindowInsets = WindowInsets.safeDrawing,
+                    snackbarHost = { SnackbarHost(snackbarHostState) },
+                    bottomBar = {
+                        if (!isChromeless) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(colors.altBackground)
+                                    .navigationBarsPadding(),
+                            ) {
+                                MiniPlayerBar(
+                                    track = playbackState.currentTrack,
+                                    isPlaying = playbackState.isPlaying,
+                                    positionMs = playbackState.positionMs,
+                                    durationMs = playbackState.durationMs,
+                                    onOpenPlayer = { navController.navigate(MyatoRoute.FullPlayer) },
+                                    onPlayPause = { viewModel.playbackController.togglePlayPause() },
+                                    onNext = { viewModel.playbackController.skipNext() },
+                                )
+                                if (!useRail) {
+                                    NavigationBar(
+                                        containerColor = colors.altBackground,
+                                        contentColor = colors.textPrimary,
+                                    ) {
+                                        topItems.forEach { item ->
+                                            val selected = currentDestination?.hasRoute(item.route::class) == true
+                                            NavigationBarItem(
+                                                selected = selected,
+                                                onClick = {
+                                                    navController.navigate(item.route) {
+                                                        popUpTo<MyatoRoute.Home> { saveState = true }
+                                                        launchSingleTop = true
+                                                        restoreState = true
+                                                    }
+                                                },
+                                                icon = { Icon(item.icon, contentDescription = item.label) },
+                                                label = { Text(item.label, maxLines = 1) },
+                                                colors = NavigationBarItemDefaults.colors(
+                                                    selectedIconColor = Color.Black,
+                                                    selectedTextColor = colors.primary,
+                                                    indicatorColor = colors.primary,
+                                                    unselectedIconColor = colors.textSecondary,
+                                                    unselectedTextColor = colors.textSecondary,
+                                                ),
+                                                modifier = Modifier.testTag(item.testTag),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                ) { innerPadding ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding),
+                    ) {
+                        NavHost(
+                            navController = navController,
+                            startDestination = MyatoRoute.Splash,
+                        ) {
+                            composable<MyatoRoute.Splash> {
+                                SplashScreen(
+                                    onFinished = {
+                                        val dest: MyatoRoute = when {
+                                            openPlayerOnStart -> MyatoRoute.FullPlayer
+                                            !preferences.hasCompletedOnboarding -> MyatoRoute.Onboarding
+                                            else -> MyatoRoute.Home
+                                        }
+                                        if (dest == MyatoRoute.Home) {
+                                            viewModel.refreshLibrary()
+                                        }
+                                        navController.navigate(dest) {
+                                            popUpTo<MyatoRoute.Splash> { inclusive = true }
+                                        }
+                                    }
+                                )
+                            }
+
+                            composable<MyatoRoute.Onboarding> {
+                                OnboardingScreen(
+                                    onContinue = {
+                                        viewModel.completeOnboarding()
+                                        navController.navigate(MyatoRoute.Permissions) {
+                                            popUpTo<MyatoRoute.Onboarding> { inclusive = true }
+                                        }
+                                    }
+                                )
+                            }
+
+                            composable<MyatoRoute.Permissions> {
+                                PermissionsScreen(
+                                    onPermissionsGranted = {
+                                        viewModel.refreshLibrary()
+                                        navController.navigate(MyatoRoute.Home) {
+                                            popUpTo<MyatoRoute.Permissions> { inclusive = true }
+                                        }
+                                    },
+                                    onImportSafFolder = { uri -> viewModel.importSafFolder(uri) },
+                                )
+                            }
+
+                            composable<MyatoRoute.Home> {
+                                HomeScreen(
+                                    tracks = tracks,
+                                    recentTracks = recentTracks,
+                                    mostPlayed = mostPlayed,
+                                    queues = queues,
+                                    playbackState = playbackState,
+                                    statsSummary = statsSummary,
+                                    isScanning = isScanning,
+                                    onRefreshLibrary = { viewModel.refreshLibrary() },
+                                    onOpenPermissions = { navController.navigate(MyatoRoute.Permissions) },
+                                    onPlayTrackList = { list, idx, name, type ->
+                                        viewModel.playTracks(list, idx, name, type)
+                                    },
+                                    onSwitchQueue = { qid -> viewModel.playbackController.switchToQueue(qid) },
+                                    onOpenPlayer = { navController.navigate(MyatoRoute.FullPlayer) },
+                                    onOpenAllSongs = { navController.navigate(MyatoRoute.AllSongs) },
+                                    onOpenQueues = { navController.navigate(MyatoRoute.Queues) },
+                                    onOpenEqualizer = { navController.navigate(MyatoRoute.Equalizer) },
+                                    onOpenSleepTimer = { navController.navigate(MyatoRoute.SleepTimer) },
+                                    onOpenFileManager = { navController.navigate(MyatoRoute.FileManager) },
+                                    onOpenStats = { navController.navigate(MyatoRoute.Statistics) },
+                                    onOpenBackup = { navController.navigate(MyatoRoute.Backup) },
+                                    onOpenWidgets = { navController.navigate(MyatoRoute.WidgetsShortcuts) },
+                                    onTrackMoreClick = { contextMenuTrack = it },
+                                )
+                            }
+
+                            composable<MyatoRoute.LibraryHub> {
+                                LibraryHubScreen(
+                                    tracksCount = tracks.size,
+                                    albumsCount = albums.size,
+                                    artistsCount = artists.size,
+                                    foldersCount = folders.size,
+                                    genresCount = genres.size,
+                                    favoritesCount = favorites.size,
+                                    onOpenAllSongs = { navController.navigate(MyatoRoute.AllSongs) },
+                                    onOpenAlbums = { navController.navigate(MyatoRoute.Albums) },
+                                    onOpenArtists = { navController.navigate(MyatoRoute.Artists) },
+                                    onOpenFolders = { navController.navigate(MyatoRoute.Folders) },
+                                    onOpenGenres = { navController.navigate(MyatoRoute.Genres) },
+                                    onOpenFavorites = { navController.navigate(MyatoRoute.Favorites) },
+                                    onOpenFileManager = { navController.navigate(MyatoRoute.FileManager) },
+                                    onOpenQueues = { navController.navigate(MyatoRoute.Queues) },
+                                    onRefreshLibrary = { viewModel.refreshLibrary() },
+                                )
+                            }
+
+                            composable<MyatoRoute.AllSongs> {
+                                AllSongsScreen(
+                                    tracks = tracks,
+                                    currentTrackId = playbackState.currentTrack?.id,
+                                    duplicates = duplicates,
+                                    onBack = { navController.popBackStack() },
+                                    onRefresh = { viewModel.refreshLibrary() },
+                                    onScanDuplicates = { viewModel.scanDuplicates() },
+                                    onPlayTracks = { list, idx, name, type ->
+                                        viewModel.playTracks(list, idx, name, type)
+                                    },
+                                    onBatchAddToPlaylists = { ids -> playlistDialogTrackIds = ids },
+                                    onBatchEditTags = { ids ->
+                                        navController.navigate(MyatoRoute.TagEditor(ids.joinToString(",")))
+                                    },
+                                    onBatchCreateQueue = { ids ->
+                                        viewModel.createQueue("Seleção (${ids.size})", ids)
+                                    },
+                                    onTrackMoreClick = { contextMenuTrack = it },
+                                    sortTracks = { list, order, q -> viewModel.sortTracks(list, order, q) },
+                                )
+                            }
+
+                            composable<MyatoRoute.Artists> {
+                                ArtistsScreen(
+                                    artists = artists,
+                                    tracks = tracks,
+                                    onBack = { navController.popBackStack() },
+                                    onPlayArtistQueue = { name, list ->
+                                        viewModel.playTracks(list, 0, name, QueueOriginType.ARTIST, name)
+                                    },
+                                    onPinShortcut = { type, key, label -> viewModel.pinShortcut(type, key, label) },
+                                )
+                            }
+
+                            composable<MyatoRoute.Albums> {
+                                AlbumsScreen(
+                                    albums = albums,
+                                    tracks = tracks,
+                                    onBack = { navController.popBackStack() },
+                                    onPlayAlbumQueue = { album, list, idx ->
+                                        viewModel.playTracks(list, idx, album.title, QueueOriginType.ALBUM, album.id.toString())
+                                    },
+                                )
+                            }
+
+                            composable<MyatoRoute.Folders> {
+                                FoldersScreen(
+                                    folders = folders,
+                                    tracks = tracks,
+                                    monitoredFolders = preferences.monitoredFolders,
+                                    onUpdateMonitoredFolders = { viewModel.setMonitoredFolders(it) },
+                                    onBack = { navController.popBackStack() },
+                                    onPlayFolder = { folder, list ->
+                                        viewModel.playTracks(list, 0, folder.name, QueueOriginType.FOLDER, folder.path)
+                                    },
+                                )
+                            }
+
+                            composable<MyatoRoute.Genres> {
+                                GenresScreen(
+                                    genres = genres,
+                                    tracks = tracks,
+                                    onBack = { navController.popBackStack() },
+                                    onPlayGenre = { genreName, list ->
+                                        viewModel.playTracks(list, 0, genreName, QueueOriginType.CUSTOM, genreName)
+                                    },
+                                )
+                            }
+
+                            composable<MyatoRoute.Favorites> {
+                                FavoritesScreen(
+                                    favorites = favorites,
+                                    currentTrackId = playbackState.currentTrack?.id,
+                                    onBack = { navController.popBackStack() },
+                                    onPlayFavorites = { list, idx ->
+                                        viewModel.playTracks(list, idx, "Favoritos", QueueOriginType.FAVORITES, "favorites")
+                                    },
+                                    onTrackMoreClick = { contextMenuTrack = it },
+                                )
+                            }
+
+                            composable<MyatoRoute.Playlists> {
+                                PlaylistsScreen(
+                                    playlists = playlists,
+                                    allTracks = tracks,
+                                    observePlaylistTrackIds = { pid -> viewModel.observePlaylistTrackIds(pid) },
+                                    onCreatePlaylist = { name -> viewModel.createPlaylist(name) },
+                                    onRenamePlaylist = { id, name -> viewModel.renamePlaylist(id, name) },
+                                    onDeletePlaylist = { id -> viewModel.deletePlaylist(id) },
+                                    onPlayPlaylist = { pl, list, shuffle ->
+                                        val final = if (shuffle) list.shuffled() else list
+                                        viewModel.playTracks(final, 0, pl.name, QueueOriginType.PLAYLIST, pl.id.toString())
+                                    },
+                                    onRemoveTrackFromPlaylist = { pid, tid -> viewModel.removeTrackFromPlaylist(pid, tid) },
+                                    onReorderPlaylist = { pid, ids -> viewModel.reorderPlaylist(pid, ids) },
+                                    onAddTracksToPlaylist = { pid, ids -> viewModel.addTracksToPlaylists(listOf(pid), ids) },
+                                    onExportM3u = { pid, uri -> viewModel.exportPlaylistM3u(pid, uri) },
+                                    onImportM3u = { uri, name -> viewModel.importPlaylistM3u(uri, name) },
+                                )
+                            }
+
+                            composable<MyatoRoute.Queues> {
+                                QueuesScreen(
+                                    queues = queues,
+                                    allTracks = tracks,
+                                    playbackState = playbackState,
+                                    onBack = { navController.popBackStack() },
+                                    onSwitchQueue = { qid -> viewModel.playbackController.switchToQueue(qid) },
+                                    onCreateQueue = { name, ids -> viewModel.createQueue(name, ids) },
+                                    onRenameQueue = { id, name -> viewModel.renameQueue(id, name) },
+                                    onDuplicateQueue = { id -> viewModel.duplicateQueue(id) },
+                                    onDeleteQueue = { id -> viewModel.deleteQueue(id) },
+                                    onMergeQueues = { src, dst -> viewModel.mergeQueues(src, dst) },
+                                    onReplaceQueue = { qid, ids -> viewModel.replaceQueueWithTracks(qid, ids) },
+                                    onMoveActiveTrack = { from, to -> viewModel.playbackController.moveTrackInActiveQueue(from, to) },
+                                    onRemoveActiveTrack = { idx -> viewModel.playbackController.removeTrackFromActiveQueue(idx) },
+                                )
+                            }
+
+                            composable<MyatoRoute.FullPlayer> {
+                                FullPlayerScreen(
+                                    playbackState = playbackState,
+                                    spectrumBars = spectrumBars,
+                                    visualizerEnabled = preferences.visualizerEnabled,
+                                    bookmarks = currentBookmarks,
+                                    note = currentNote,
+                                    onClose = { navController.popBackStack() },
+                                    onPlayPause = { viewModel.playbackController.togglePlayPause() },
+                                    onNext = { viewModel.playbackController.skipNext() },
+                                    onPrevious = { viewModel.playbackController.skipPrevious() },
+                                    onSeekTo = { viewModel.playbackController.seekTo(it) },
+                                    onSeekForward10s = { viewModel.playbackController.seekForward10s() },
+                                    onSeekBack10s = { viewModel.playbackController.seekBackward10s() },
+                                    onToggleShuffle = { viewModel.playbackController.toggleShuffle() },
+                                    onCycleRepeat = { viewModel.playbackController.cycleRepeatMode() },
+                                    onToggleFavorite = { viewModel.playbackController.toggleCurrentTrackFavorite() },
+                                    onVolumeChange = { viewModel.playbackController.setVolumeFraction(it) },
+                                    onOpenQueue = { navController.navigate(MyatoRoute.Queues) },
+                                    onOpenLyrics = { tid -> navController.navigate(MyatoRoute.Lyrics(tid)) },
+                                    onOpenEqualizer = { navController.navigate(MyatoRoute.Equalizer) },
+                                    onOpenSleepTimer = { navController.navigate(MyatoRoute.SleepTimer) },
+                                    onOpenTagEditor = { tid -> navController.navigate(MyatoRoute.TagEditor(tid.toString())) },
+                                    onAddBookmark = { tid, label, pos -> viewModel.addBookmark(tid, label, pos) },
+                                    onDeleteBookmark = { id -> viewModel.deleteBookmark(id) },
+                                    onSaveNote = { tid, content -> viewModel.saveNote(tid, content) },
+                                    onDeleteNote = { tid -> viewModel.deleteNote(tid) },
+                                )
+                            }
+
+                            composable<MyatoRoute.Lyrics> { entry ->
+                                val route = entry.toRoute<MyatoRoute.Lyrics>()
+                                val targetTrack = tracks.firstOrNull { it.id == route.trackId } ?: playbackState.currentTrack
+                                LyricsScreen(
+                                    track = targetTrack,
+                                    currentPositionMs = playbackState.positionMs,
+                                    onBack = { navController.popBackStack() },
+                                    onSeekTo = { viewModel.playbackController.seekTo(it) },
+                                    loadLyrics = { t -> viewModel.loadTrackLyrics(t) },
+                                    onSaveLyrics = { t, content -> viewModel.saveTrackLyrics(t, content) },
+                                )
+                            }
+
+                            composable<MyatoRoute.TagEditor> { entry ->
+                                val route = entry.toRoute<MyatoRoute.TagEditor>()
+                                val ids = route.trackIdsCsv.split(",").mapNotNull { it.trim().toLongOrNull() }.toSet()
+                                val targets = tracks.filter { it.id in ids }
+                                TagEditorScreen(
+                                    targetTracks = targets,
+                                    onBack = { navController.popBackStack() },
+                                    inspectTags = { t -> viewModel.inspectTags(t) },
+                                    onSaveTags = { list, payload, isBatch -> viewModel.saveTagsBatch(list, payload, isBatch) },
+                                )
+                            }
+
+                            composable<MyatoRoute.FileManager> {
+                                FileManagerScreen(
+                                    initialPath = viewModel.defaultRootDir(),
+                                    onBack = { navController.popBackStack() },
+                                    listDirectory = { path -> viewModel.listDirectory(path) },
+                                    listLinearAudio = { viewModel.listAllAudioLinear() },
+                                    onCreateFolder = { parent, name, done -> viewModel.createFolder(parent, name, done) },
+                                    onRenameNode = { path, name, done -> viewModel.renameFileOrFolder(path, name, done) },
+                                    onCopyFiles = { paths, dst, done -> viewModel.copyFiles(paths, dst, done) },
+                                    onMoveFiles = { paths, dst, done -> viewModel.moveFiles(paths, dst, done) },
+                                    onDeleteFiles = { paths, done -> viewModel.deleteFiles(paths, done) },
+                                    onRefreshLibrary = { viewModel.refreshLibrary() },
+                                )
+                            }
+
+                            composable<MyatoRoute.Equalizer> {
+                                val eqEngine = viewModel.playbackController.equalizerEngine
+                                EqualizerScreen(
+                                    eqState = eqState,
+                                    savedPresets = eqPresets,
+                                    builtInPresetNames = eqEngine.builtInPresets.keys.toList(),
+                                    visualizerEnabled = preferences.visualizerEnabled,
+                                    onBack = { navController.popBackStack() },
+                                    onToggleEnabled = { eqEngine.setEnabled(it) },
+                                    onSelectOutputDevice = { eqEngine.selectOutputDeviceProfile(it) },
+                                    onBandChange = { idx, level -> eqEngine.setBandLevel(idx, level) },
+                                    onBassBoostChange = { eqEngine.setBassBoost(it) },
+                                    onVirtualizerChange = { eqEngine.setVirtualizer(it) },
+                                    onLoudnessChange = { eqEngine.setLoudnessGain(it) },
+                                    onTrebleChange = { eqEngine.setTrebleBoost(it) },
+                                    onApplyBuiltInPreset = { eqEngine.applyBuiltInPreset(it) },
+                                    onApplySavedPreset = { eqEngine.applySavedPreset(it) },
+                                    onSaveCustomPreset = { eqEngine.saveCustomPreset(it) },
+                                    onResetDefaults = { eqEngine.resetDefaults() },
+                                    onToggleVisualizer = { viewModel.setVisualizerEnabled(it) },
+                                )
+                            }
+
+                            composable<MyatoRoute.SleepTimer> {
+                                val timer = viewModel.playbackController.sleepTimerManager
+                                SleepTimerScreen(
+                                    timerState = sleepTimerState,
+                                    onBack = { navController.popBackStack() },
+                                    onStartMinutes = { timer.startDurationTimer(it) },
+                                    onStartClockTime = { h, m -> timer.startUntilClockTime(h, m) },
+                                    onStartTrackCount = { timer.startTrackCountTimer(it) },
+                                    onPauseResume = { timer.pauseOrResume() },
+                                    onCancel = { timer.cancel() },
+                                )
+                            }
+
+                            composable<MyatoRoute.Statistics> {
+                                StatisticsScreen(
+                                    summary = statsSummary,
+                                    onBack = { navController.popBackStack() },
+                                    onExportCsv = { uri -> viewModel.exportTopTracksCsv(uri) },
+                                )
+                            }
+
+                            composable<MyatoRoute.ThemeCenter> {
+                                ThemeCenterScreen(
+                                    themes = allThemes,
+                                    activeThemeId = activeTheme.id,
+                                    onSelectTheme = { viewModel.selectTheme(it) },
+                                    onOpenEditor = { tid -> navController.navigate(MyatoRoute.ThemeEditor(tid)) },
+                                    onDuplicateTheme = { t, name -> viewModel.duplicateTheme(t, name) },
+                                    onDeleteCustomTheme = { viewModel.deleteCustomTheme(it) },
+                                    onImportThemeJson = { raw -> viewModel.importThemeJson(raw) },
+                                )
+                            }
+
+                            composable<MyatoRoute.ThemeEditor> { entry ->
+                                val route = entry.toRoute<MyatoRoute.ThemeEditor>()
+                                val source = allThemes.firstOrNull { it.id == route.sourceThemeId } ?: BuiltInThemes.MidnightOrange
+                                ThemeEditorScreen(
+                                    sourceTheme = source,
+                                    onBack = { navController.popBackStack() },
+                                    onSaveTheme = { viewModel.saveCustomTheme(it) },
+                                    onGenerateFromCover = { cb -> viewModel.generateThemeFromCurrentCover(cb) },
+                                    onExportThemeJson = { t -> viewModel.exportThemeJson(t) },
+                                    onNotify = { msg -> viewModel.showStatus(msg) },
+                                )
+                            }
+
+                            composable<MyatoRoute.WidgetsShortcuts> {
+                                WidgetsShortcutsScreen(
+                                    albums = albums,
+                                    artists = artists,
+                                    folders = folders,
+                                    playlists = playlists,
+                                    onBack = { navController.popBackStack() },
+                                    onPinShortcut = { type, key, label -> viewModel.pinShortcut(type, key, label) },
+                                )
+                            }
+
+                            composable<MyatoRoute.Backup> {
+                                BackupScreen(
+                                    preferences = preferences,
+                                    backupHistory = backupHistory,
+                                    previewedBackup = previewedBackup?.first,
+                                    onBack = { navController.popBackStack() },
+                                    onExportManual = { uri -> viewModel.exportManualBackup(uri) },
+                                    onSelectBackupToPreview = { uri -> viewModel.loadBackupPreview(uri) },
+                                    onConfirmRestore = { preserve -> viewModel.confirmRestoreBackup(preserve) },
+                                    onDismissPreview = { viewModel.dismissBackupPreview() },
+                                    onConfigureAutoBackup = { days, uri -> viewModel.configureAutoBackup(days, uri) },
+                                )
+                            }
+
+                            composable<MyatoRoute.Settings> {
+                                SettingsScreen(
+                                    preferences = preferences,
+                                    capabilities = viewModel.audioCapabilities,
+                                    onSetGapless = { viewModel.setGapless(it) },
+                                    onSetBatterySaverAnim = { viewModel.setBatterySaverAnimations(it) },
+                                    onSetNotificationPrefs = { compact, plBtn -> viewModel.setNotificationPreferences(compact, plBtn) },
+                                    onSetHeadsetMappings = { c1, c2, c3, c4 -> viewModel.setHeadsetMappings(c1, c2, c3, c4) },
+                                    onOpenPermissions = { navController.navigate(MyatoRoute.Permissions) },
+                                    onOpenBackup = { navController.navigate(MyatoRoute.Backup) },
+                                    onOpenWidgets = { navController.navigate(MyatoRoute.WidgetsShortcuts) },
+                                    onOpenAbout = { navController.navigate(MyatoRoute.About) },
+                                )
+                            }
+
+                            composable<MyatoRoute.About> {
+                                AboutScreen(onBack = { navController.popBackStack() })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        contextMenuTrack?.let { track ->
+            TrackContextMenuSheet(
+                track = track,
+                onDismiss = { contextMenuTrack = null },
+                onPlayNext = { viewModel.playbackController.addTrackNextInActiveQueue(track) },
+                onAddToQueue = { viewModel.playbackController.appendTrackToActiveQueue(track) },
+                onAddToPlaylists = { playlistDialogTrackIds = listOf(track.id) },
+                onToggleFavorite = { viewModel.toggleFavorite(track.id) },
+                onEditTags = { navController.navigate(MyatoRoute.TagEditor(track.id.toString())) },
+                onOpenLyrics = { navController.navigate(MyatoRoute.Lyrics(track.id)) },
+                onRemoveFromLibrary = { viewModel.removeTrackFromLibrary(track.id) },
+            )
+        }
+
+        playlistDialogTrackIds?.let { targetIds ->
+            AddToPlaylistsDialog(
+                playlists = playlists,
+                onDismiss = { playlistDialogTrackIds = null },
+                onCreatePlaylist = { name -> viewModel.createPlaylist(name) },
+                onConfirm = { chosenPlaylists -> viewModel.addTracksToPlaylists(chosenPlaylists, targetIds) },
+            )
+        }
+    }
+}

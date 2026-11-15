@@ -1,0 +1,165 @@
+name: Android CI & APK Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build, Test & Package MYATO MUSIC APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Run Unit & Robolectric Tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Upload Test Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: app/build/reports/tests/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Build Debug APK
+        run: |
+          ./gradlew :app:assembleDebug --no-daemon
+          mkdir -p dist
+          DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$DEBUG_APK" ]; then
+            echo "::error::Debug APK not found at $DEBUG_APK"
+            exit 1
+          fi
+          cp "$DEBUG_APK" dist/MYATO-MUSIC-debug.apk
+          cp "$DEBUG_APK" dist/MYATO-MUSIC.apk
+          ls -lh dist/
+
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MYATO-MUSIC-debug-apk
+          path: |
+            dist/MYATO-MUSIC-debug.apk
+            dist/MYATO-MUSIC.apk
+          retention-days: 30
+
+      - name: Build & Sign Release APK (when keystore secrets are configured)
+        id: release_build
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ORIG_KS="/tmp/myato-release-orig.jks"
+          GRADLE_KS="/tmp/myato-release-gradle.jks"
+          cleanup() {
+            rm -f "$ORIG_KS" "$GRADLE_KS"
+          }
+          trap cleanup EXIT
+
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ] || \
+             [ -z "${ANDROID_KEYSTORE_PASSWORD:-}" ] || \
+             [ -z "${ANDROID_KEY_ALIAS:-}" ] || \
+             [ -z "${ANDROID_KEY_PASSWORD:-}" ]; then
+            echo "::notice::Release signing secrets not configured. Skipping signed Release APK. Configure ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD to generate MYATO-MUSIC-release.apk."
+            echo "has_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '\n\r ' | base64 --decode > "$ORIG_KS"
+          cp "$ORIG_KS" "$GRADLE_KS"
+
+          if [ "$ANDROID_KEY_ALIAS" != "upload" ]; then
+            keytool -changealias \
+              -alias "$ANDROID_KEY_ALIAS" \
+              -destalias "upload" \
+              -keystore "$GRADLE_KS" \
+              -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+              -keypass "$ANDROID_KEY_PASSWORD"
+          fi
+
+          KEYSTORE_PATH="$GRADLE_KS" \
+          STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD" \
+          KEY_PASSWORD="$ANDROID_KEY_PASSWORD" \
+          ./gradlew :app:assembleRelease --no-daemon
+
+          RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$RELEASE_APK" ]; then
+            echo "::error::Release APK not found at $RELEASE_APK"
+            exit 1
+          fi
+
+          APKSIGNER="$(find "${ANDROID_HOME}/build-tools" -name apksigner | sort -V | tail -n 1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::apksigner not found in ${ANDROID_HOME}/build-tools"
+            exit 1
+          fi
+
+          cp "$RELEASE_APK" dist/MYATO-MUSIC-release.apk
+          "$APKSIGNER" sign \
+            --ks "$ORIG_KS" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass "env:ANDROID_KEYSTORE_PASSWORD" \
+            --key-pass "env:ANDROID_KEY_PASSWORD" \
+            dist/MYATO-MUSIC-release.apk
+
+          "$APKSIGNER" verify --verbose dist/MYATO-MUSIC-release.apk
+          echo "has_release=true" >> "$GITHUB_OUTPUT"
+          ls -lh dist/MYATO-MUSIC-release.apk
+
+      - name: Upload Signed Release APK Artifact
+        if: steps.release_build.outputs.has_release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MYATO-MUSIC-release-apk
+          path: dist/MYATO-MUSIC-release.apk
+          retention-days: 30
+
+      - name: Verify Signed Release APK Before Tag Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ "${{ steps.release_build.outputs.has_release }}" != "true" ] || [ ! -f dist/MYATO-MUSIC-release.apk ]; then
+            echo "::error::Tag release aborted: signed MYATO-MUSIC-release.apk is required. Configure ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD in GitHub Secrets before pushing a version tag."
+            exit 1
+          fi
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') && steps.release_build.outputs.has_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: MYATO MUSIC ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/MYATO-MUSIC-release.apk
+            dist/MYATO-MUSIC-debug.apk

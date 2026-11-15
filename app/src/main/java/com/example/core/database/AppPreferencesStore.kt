@@ -1,0 +1,147 @@
+package com.example.core.database
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import com.example.core.designsystem.BuiltInThemes
+import com.example.domain.models.HeadsetButtonMapping
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+private val Context.myatoDataStore: DataStore<Preferences> by preferencesDataStore(name = "myato_preferences")
+
+data class AppUserPreferences(
+    val hasCompletedOnboarding: Boolean = false,
+    val activeThemeId: String = BuiltInThemes.MidnightOrange.id,
+    val activeQueueId: Long = 1L,
+    val lastTrackId: Long = -1L,
+    val lastPositionMs: Long = 0L,
+    val gaplessEnabled: Boolean = true,
+    val batterySaverAnimations: Boolean = false,
+    val visualizerEnabled: Boolean = true,
+    val monitoredFolders: Set<String> = emptySet(),
+    val singleClickAction: HeadsetButtonMapping = HeadsetButtonMapping.PLAY_PAUSE,
+    val doubleClickAction: HeadsetButtonMapping = HeadsetButtonMapping.NEXT_TRACK,
+    val tripleClickAction: HeadsetButtonMapping = HeadsetButtonMapping.PREV_TRACK,
+    val quadClickAction: HeadsetButtonMapping = HeadsetButtonMapping.SEEK_FORWARD,
+    val notificationCompactActions: Boolean = true,
+    val notificationShowPlaylistButton: Boolean = true,
+    val autoBackupIntervalDays: Int = 0, // 0 = disabled, 1 = daily, 7 = weekly
+    val autoBackupDirectoryUri: String = "",
+)
+
+class AppPreferencesStore(private val context: Context) {
+
+    private object Keys {
+        val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
+        val ACTIVE_THEME_ID = stringPreferencesKey("active_theme_id")
+        val ACTIVE_QUEUE_ID = longPreferencesKey("active_queue_id")
+        val LAST_TRACK_ID = longPreferencesKey("last_track_id")
+        val LAST_POSITION_MS = longPreferencesKey("last_position_ms")
+        val GAPLESS_ENABLED = booleanPreferencesKey("gapless_enabled")
+        val BATTERY_SAVER_ANIM = booleanPreferencesKey("battery_saver_anim")
+        val VISUALIZER_ENABLED = booleanPreferencesKey("visualizer_enabled")
+        val MONITORED_FOLDERS = stringSetPreferencesKey("monitored_folders")
+        val CLICK_1 = stringPreferencesKey("headset_click_1")
+        val CLICK_2 = stringPreferencesKey("headset_click_2")
+        val CLICK_3 = stringPreferencesKey("headset_click_3")
+        val CLICK_4 = stringPreferencesKey("headset_click_4")
+        val NOTIF_COMPACT = booleanPreferencesKey("notif_compact")
+        val NOTIF_PLAYLIST_BTN = booleanPreferencesKey("notif_playlist_btn")
+        val AUTO_BACKUP_DAYS = intPreferencesKey("auto_backup_days")
+        val AUTO_BACKUP_URI = stringPreferencesKey("auto_backup_uri")
+    }
+
+    val preferencesFlow: Flow<AppUserPreferences> = context.myatoDataStore.data.map { prefs ->
+        AppUserPreferences(
+            hasCompletedOnboarding = prefs[Keys.ONBOARDING_DONE] ?: false,
+            activeThemeId = prefs[Keys.ACTIVE_THEME_ID] ?: BuiltInThemes.MidnightOrange.id,
+            activeQueueId = prefs[Keys.ACTIVE_QUEUE_ID] ?: 1L,
+            lastTrackId = prefs[Keys.LAST_TRACK_ID] ?: -1L,
+            lastPositionMs = prefs[Keys.LAST_POSITION_MS] ?: 0L,
+            gaplessEnabled = prefs[Keys.GAPLESS_ENABLED] ?: true,
+            batterySaverAnimations = prefs[Keys.BATTERY_SAVER_ANIM] ?: false,
+            visualizerEnabled = prefs[Keys.VISUALIZER_ENABLED] ?: true,
+            monitoredFolders = prefs[Keys.MONITORED_FOLDERS] ?: emptySet(),
+            singleClickAction = parseMapping(prefs[Keys.CLICK_1], HeadsetButtonMapping.PLAY_PAUSE),
+            doubleClickAction = parseMapping(prefs[Keys.CLICK_2], HeadsetButtonMapping.NEXT_TRACK),
+            tripleClickAction = parseMapping(prefs[Keys.CLICK_3], HeadsetButtonMapping.PREV_TRACK),
+            quadClickAction = parseMapping(prefs[Keys.CLICK_4], HeadsetButtonMapping.SEEK_FORWARD),
+            notificationCompactActions = prefs[Keys.NOTIF_COMPACT] ?: true,
+            notificationShowPlaylistButton = prefs[Keys.NOTIF_PLAYLIST_BTN] ?: true,
+            autoBackupIntervalDays = prefs[Keys.AUTO_BACKUP_DAYS] ?: 0,
+            autoBackupDirectoryUri = prefs[Keys.AUTO_BACKUP_URI] ?: "",
+        )
+    }
+
+    private fun parseMapping(raw: String?, fallback: HeadsetButtonMapping): HeadsetButtonMapping {
+        return raw?.let { runCatching { HeadsetButtonMapping.valueOf(it) }.getOrNull() } ?: fallback
+    }
+
+    suspend fun setOnboardingDone(done: Boolean) {
+        context.myatoDataStore.edit { it[Keys.ONBOARDING_DONE] = done }
+    }
+
+    suspend fun setActiveThemeId(themeId: String) {
+        context.myatoDataStore.edit { it[Keys.ACTIVE_THEME_ID] = themeId }
+    }
+
+    suspend fun setActiveQueueState(queueId: Long, trackId: Long, positionMs: Long) {
+        context.myatoDataStore.edit {
+            it[Keys.ACTIVE_QUEUE_ID] = queueId
+            it[Keys.LAST_TRACK_ID] = trackId
+            it[Keys.LAST_POSITION_MS] = positionMs
+        }
+    }
+
+    suspend fun setGaplessEnabled(enabled: Boolean) {
+        context.myatoDataStore.edit { it[Keys.GAPLESS_ENABLED] = enabled }
+    }
+
+    suspend fun setBatterySaverAnimations(enabled: Boolean) {
+        context.myatoDataStore.edit { it[Keys.BATTERY_SAVER_ANIM] = enabled }
+    }
+
+    suspend fun setVisualizerEnabled(enabled: Boolean) {
+        context.myatoDataStore.edit { it[Keys.VISUALIZER_ENABLED] = enabled }
+    }
+
+    suspend fun setMonitoredFolders(folders: Set<String>) {
+        context.myatoDataStore.edit { it[Keys.MONITORED_FOLDERS] = folders }
+    }
+
+    suspend fun setHeadsetMappings(
+        single: HeadsetButtonMapping,
+        doubleClick: HeadsetButtonMapping,
+        triple: HeadsetButtonMapping,
+        quad: HeadsetButtonMapping,
+    ) {
+        context.myatoDataStore.edit {
+            it[Keys.CLICK_1] = single.name
+            it[Keys.CLICK_2] = doubleClick.name
+            it[Keys.CLICK_3] = triple.name
+            it[Keys.CLICK_4] = quad.name
+        }
+    }
+
+    suspend fun setNotificationPreferences(compact: Boolean, showPlaylistBtn: Boolean) {
+        context.myatoDataStore.edit {
+            it[Keys.NOTIF_COMPACT] = compact
+            it[Keys.NOTIF_PLAYLIST_BTN] = showPlaylistBtn
+        }
+    }
+
+    suspend fun setAutoBackupConfig(intervalDays: Int, directoryUri: String) {
+        context.myatoDataStore.edit {
+            it[Keys.AUTO_BACKUP_DAYS] = intervalDays
+            it[Keys.AUTO_BACKUP_URI] = directoryUri
+        }
+    }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "MYATO MUSIC",
+  "description": "Reprodutor musical offline premium com múltiplas filas, equalizador, editor de tags, letras LRC, 12 temas e backup completo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
