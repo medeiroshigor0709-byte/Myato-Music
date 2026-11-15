@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hasRoute
@@ -49,10 +50,14 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.example.core.designsystem.AddToPlaylistsDialog
 import com.example.core.designsystem.BuiltInThemes
+import com.example.core.designsystem.CreatePlaylistDialog
+import com.example.core.designsystem.DeleteTracksConfirmDialog
 import com.example.core.designsystem.LocalMyatoColors
 import com.example.core.designsystem.MiniPlayerBar
 import com.example.core.designsystem.MyatoMusicTheme
 import com.example.core.designsystem.TrackContextMenuSheet
+import com.example.core.designsystem.TrackDetailsDialog
+import com.example.core.storage.TrackShareAndDeleteHelper
 import com.example.domain.models.MusicTrack
 import com.example.domain.models.QueueOriginType
 import com.example.feature.equalizer.EqualizerScreen
@@ -132,9 +137,13 @@ fun MyatoRootApp(
 
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
 
     var contextMenuTrack by remember { mutableStateOf<MusicTrack?>(null) }
     var playlistDialogTrackIds by remember { mutableStateOf<List<Long>?>(null) }
+    var viewDetailsTrack by remember { mutableStateOf<MusicTrack?>(null) }
+    var deleteConfirmTracks by remember { mutableStateOf<List<MusicTrack>?>(null) }
+    var createPlaylistWithTracksTarget by remember { mutableStateOf<List<Long>?>(null) }
 
     LaunchedEffect(statusMessage) {
         statusMessage?.let {
@@ -366,6 +375,8 @@ fun MyatoRootApp(
                                     tracks = tracks,
                                     currentTrackId = playbackState.currentTrack?.id,
                                     duplicates = duplicates,
+                                    initialSortOrder = preferences.savedSortOrder,
+                                    initialFormatFilter = preferences.savedFormatFilter,
                                     onBack = { navController.popBackStack() },
                                     onRefresh = { viewModel.refreshLibrary() },
                                     onScanDuplicates = { viewModel.scanDuplicates() },
@@ -373,13 +384,27 @@ fun MyatoRootApp(
                                         viewModel.playTracks(list, idx, name, type)
                                     },
                                     onBatchAddToPlaylists = { ids -> playlistDialogTrackIds = ids },
+                                    onCreatePlaylistWithTracks = { name, ids ->
+                                        viewModel.createPlaylistWithTracks(name, ids)
+                                    },
+                                    onBatchAddToQueue = { tracksToAdd ->
+                                        viewModel.addTracksToActiveQueue(tracksToAdd)
+                                    },
+                                    onBatchShare = { tracksToShare ->
+                                        TrackShareAndDeleteHelper.shareTracks(context, tracksToShare)
+                                    },
+                                    onBatchDeleteFiles = { tracksToDelete ->
+                                        deleteConfirmTracks = tracksToDelete
+                                    },
                                     onBatchEditTags = { ids ->
                                         navController.navigate(MyatoRoute.TagEditor(ids.joinToString(",")))
                                     },
-                                    onBatchCreateQueue = { ids ->
-                                        viewModel.createQueue("Seleção (${ids.size})", ids)
-                                    },
                                     onTrackMoreClick = { contextMenuTrack = it },
+                                    onSaveSortOrder = { viewModel.setLibrarySortOrder(it) },
+                                    onSaveFormatFilter = { viewModel.setLibraryFormatFilter(it) },
+                                    onSmartSelect = { criteria, ref ->
+                                        viewModel.selectTracksByCriteria(tracks, criteria, ref)
+                                    },
                                     sortTracks = { list, order, q -> viewModel.sortTracks(list, order, q) },
                                 )
                             }
@@ -460,6 +485,15 @@ fun MyatoRootApp(
                                     onAddTracksToPlaylist = { pid, ids -> viewModel.addTracksToPlaylists(listOf(pid), ids) },
                                     onExportM3u = { pid, uri -> viewModel.exportPlaylistM3u(pid, uri) },
                                     onImportM3u = { uri, name -> viewModel.importPlaylistM3u(uri, name) },
+                                    onDuplicatePlaylist = { id -> viewModel.duplicatePlaylist(id) },
+                                    onClearPlaylist = { id -> viewModel.clearPlaylist(id) },
+                                    onToggleFavorite = { id -> viewModel.togglePlaylistFavorite(id) },
+                                    onUpdateCover = { id, uri -> viewModel.updatePlaylistCover(id, uri) },
+                                    onRemoveTracksFromPlaylist = { pid, ids -> viewModel.removeTracksFromPlaylist(pid, ids) },
+                                    onAddTracksToPlaylistsWithResult = { pids, ids, allowDup ->
+                                        viewModel.addTracksToPlaylistsWithResult(pids, ids, allowDup)
+                                    },
+                                    onTrackMoreClick = { contextMenuTrack = it },
                                 )
                             }
 
@@ -478,6 +512,9 @@ fun MyatoRootApp(
                                     onReplaceQueue = { qid, ids -> viewModel.replaceQueueWithTracks(qid, ids) },
                                     onMoveActiveTrack = { from, to -> viewModel.playbackController.moveTrackInActiveQueue(from, to) },
                                     onRemoveActiveTrack = { idx -> viewModel.playbackController.removeTrackFromActiveQueue(idx) },
+                                    onPlayTrackAtIndex = { idx -> viewModel.playTrackAtIndexInQueue(idx) },
+                                    onClearActiveQueue = { viewModel.clearActiveQueue() },
+                                    onSaveQueueAsPlaylist = { name, ids -> viewModel.saveQueueAsPlaylist(name, ids) },
                                 )
                             }
 
@@ -672,23 +709,92 @@ fun MyatoRootApp(
         contextMenuTrack?.let { track ->
             TrackContextMenuSheet(
                 track = track,
+                isInPlaylist = false,
                 onDismiss = { contextMenuTrack = null },
-                onPlayNext = { viewModel.playbackController.addTrackNextInActiveQueue(track) },
-                onAddToQueue = { viewModel.playbackController.appendTrackToActiveQueue(track) },
-                onAddToPlaylists = { playlistDialogTrackIds = listOf(track.id) },
-                onToggleFavorite = { viewModel.toggleFavorite(track.id) },
-                onEditTags = { navController.navigate(MyatoRoute.TagEditor(track.id.toString())) },
-                onOpenLyrics = { navController.navigate(MyatoRoute.Lyrics(track.id)) },
-                onRemoveFromLibrary = { viewModel.removeTrackFromLibrary(track.id) },
+                onPlayNow = {
+                    viewModel.playTracks(listOf(track), 0, track.title, QueueOriginType.CUSTOM)
+                },
+                onPlayNext = {
+                    viewModel.addTrackNextInActiveQueue(track)
+                },
+                onAddToQueue = {
+                    viewModel.addTracksToActiveQueue(listOf(track))
+                },
+                onAddToPlaylists = {
+                    playlistDialogTrackIds = listOf(track.id)
+                },
+                onCreatePlaylistWithTrack = {
+                    createPlaylistWithTracksTarget = listOf(track.id)
+                },
+                onPlayFromHere = {
+                    val idx = tracks.indexOfFirst { it.id == track.id }
+                    if (idx != -1) {
+                        viewModel.playTracks(tracks.drop(idx) + tracks.take(idx), 0, "Biblioteca", QueueOriginType.ALL_SONGS)
+                    } else {
+                        viewModel.playTracks(listOf(track), 0, track.title, QueueOriginType.CUSTOM)
+                    }
+                },
+                onToggleFavorite = {
+                    viewModel.toggleFavorite(track.id)
+                },
+                onShareTrack = {
+                    TrackShareAndDeleteHelper.shareTracks(context, listOf(track))
+                },
+                onEditTags = {
+                    navController.navigate(MyatoRoute.TagEditor(track.id.toString()))
+                },
+                onViewDetails = {
+                    viewDetailsTrack = track
+                },
+                onOpenLocation = {
+                    navController.navigate(MyatoRoute.FileManager)
+                },
+                onDeleteTrack = {
+                    deleteConfirmTracks = listOf(track)
+                },
             )
         }
 
         playlistDialogTrackIds?.let { targetIds ->
             AddToPlaylistsDialog(
                 playlists = playlists,
+                targetTrackIds = targetIds,
+                tracks = tracks,
                 onDismiss = { playlistDialogTrackIds = null },
-                onCreatePlaylist = { name -> viewModel.createPlaylist(name) },
-                onConfirm = { chosenPlaylists -> viewModel.addTracksToPlaylists(chosenPlaylists, targetIds) },
+                onCreatePlaylist = { name, ids ->
+                    viewModel.createPlaylistWithTracks(name, ids)
+                },
+                onConfirm = { chosenPlaylists, allowDuplicates ->
+                    viewModel.addTracksToPlaylistsWithResult(chosenPlaylists, targetIds, allowDuplicates)
+                },
+            )
+        }
+
+        viewDetailsTrack?.let { track ->
+            TrackDetailsDialog(
+                track = track,
+                onDismiss = { viewDetailsTrack = null },
+            )
+        }
+
+        deleteConfirmTracks?.let { targetTracks ->
+            DeleteTracksConfirmDialog(
+                tracks = targetTracks,
+                onDismiss = { deleteConfirmTracks = null },
+                onConfirm = {
+                    viewModel.deleteTracksPermanently(targetTracks)
+                },
+            )
+        }
+
+        createPlaylistWithTracksTarget?.let { targetIds ->
+            CreatePlaylistDialog(
+                initialName = "",
+                trackCount = targetIds.size,
+                onDismiss = { createPlaylistWithTracksTarget = null },
+                onConfirm = { name ->
+                    viewModel.createPlaylistWithTracks(name, targetIds)
+                },
             )
         }
     }

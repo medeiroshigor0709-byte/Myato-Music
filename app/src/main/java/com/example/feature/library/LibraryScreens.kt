@@ -27,10 +27,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Category
+import androidx.compose.material.icons.rounded.Checklist
+import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.Deselect
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Folder
@@ -40,9 +46,14 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Sort
+import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -78,6 +89,8 @@ import com.example.R
 import com.example.core.common.TimeFormatter
 import com.example.core.designsystem.AlbumArtwork
 import com.example.core.designsystem.CompactTrackRow
+import com.example.core.designsystem.CreatePlaylistDialog
+import com.example.core.designsystem.DeleteTracksConfirmDialog
 import com.example.core.designsystem.LocalMyatoColors
 import com.example.core.storage.DuplicateGroup
 import com.example.domain.models.AlbumItem
@@ -86,6 +99,7 @@ import com.example.domain.models.FolderItem
 import com.example.domain.models.GenreItem
 import com.example.domain.models.MusicTrack
 import com.example.domain.models.QueueOriginType
+import com.example.domain.models.SmartSelectionCriteria
 import com.example.domain.models.TrackSortOrder
 
 @Composable
@@ -174,29 +188,40 @@ fun LibraryHubScreen(
 }
 
 /**
- * 5. All Songs Screen with real-time search, sorting, multi-selection, duplicate finder, and batch actions.
+ * 5. All Songs Screen with real-time search, sorting, smart selection, quick add to playlist, and batch actions.
  */
 @Composable
 fun AllSongsScreen(
     tracks: List<MusicTrack>,
     currentTrackId: Long?,
     duplicates: List<DuplicateGroup>,
+    initialSortOrder: TrackSortOrder = TrackSortOrder.TITLE_ASC,
+    initialFormatFilter: String = "Todos",
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onScanDuplicates: () -> Unit,
     onPlayTracks: (List<MusicTrack>, Int, String, QueueOriginType) -> Unit,
     onBatchAddToPlaylists: (List<Long>) -> Unit,
+    onCreatePlaylistWithTracks: (String, List<Long>) -> Unit,
+    onBatchAddToQueue: (List<MusicTrack>) -> Unit,
+    onBatchShare: (List<MusicTrack>) -> Unit,
+    onBatchDeleteFiles: (List<MusicTrack>) -> Unit,
     onBatchEditTags: (List<Long>) -> Unit,
-    onBatchCreateQueue: (List<Long>) -> Unit,
     onTrackMoreClick: (MusicTrack) -> Unit,
+    onSaveSortOrder: (TrackSortOrder) -> Unit = {},
+    onSaveFormatFilter: (String) -> Unit = {},
+    onSmartSelect: (SmartSelectionCriteria, MusicTrack?) -> List<Long>,
     sortTracks: (List<MusicTrack>, TrackSortOrder, String) -> List<MusicTrack>,
 ) {
     val colors = LocalMyatoColors.current
     var query by remember { mutableStateOf("") }
-    var sortOrder by remember { mutableStateOf(TrackSortOrder.TITLE_ASC) }
+    var sortOrder by remember { mutableStateOf(initialSortOrder) }
+    var formatFilter by remember { mutableStateOf(initialFormatFilter) }
     var showSortMenu by remember { mutableStateOf(false) }
+    var showSmartSelectMenu by remember { mutableStateOf(false) }
     var showDuplicatesDialog by remember { mutableStateOf(false) }
-    var formatFilter by remember { mutableStateOf("Todos") }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var showCreatePlaylistDialog by remember { mutableStateOf(false) }
 
     val selectedIds = remember { mutableStateListOf<Long>() }
     val isSelectionMode = selectedIds.isNotEmpty()
@@ -213,165 +238,338 @@ fun AllSongsScreen(
         listOf("Todos") + tracks.map { it.formatExtension }.distinct().sorted()
     }
 
-    Column(
+    val selectedTracks = remember(selectedIds.toList(), tracks) {
+        val selSet = selectedIds.toSet()
+        tracks.filter { it.id in selSet }
+    }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.background)
             .testTag("all_songs_screen"),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { if (isSelectionMode) selectedIds.clear() else onBack() }) {
-                Icon(
-                    imageVector = if (isSelectionMode) Icons.Rounded.Close else Icons.AutoMirrored.Rounded.ArrowBack,
-                    contentDescription = stringResource(R.string.cd_back),
-                    tint = colors.textPrimary,
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Top App Bar / Multi-selection Action Bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(if (isSelectionMode) colors.primary.copy(alpha = 0.15f) else Color.Transparent)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { if (isSelectionMode) selectedIds.clear() else onBack() }) {
+                    Icon(
+                        imageVector = if (isSelectionMode) Icons.Rounded.Close else Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = stringResource(R.string.cd_back),
+                        tint = colors.textPrimary,
+                    )
+                }
+
+                Text(
+                    text = if (isSelectionMode) "${selectedIds.size} selecionada(s)" else "Músicas (${displayed.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isSelectionMode) colors.primary else colors.textPrimary,
+                    modifier = Modifier.weight(1f),
                 )
+
+                if (isSelectionMode) {
+                    IconButton(
+                        onClick = {
+                            selectedIds.clear()
+                            selectedIds.addAll(displayed.map { it.id })
+                        },
+                    ) {
+                        Icon(Icons.Rounded.SelectAll, contentDescription = "Selecionar todas", tint = colors.textPrimary)
+                    }
+
+                    IconButton(
+                        onClick = {
+                            val cur = selectedIds.toSet()
+                            val inverted = displayed.map { it.id }.filter { it !in cur }
+                            selectedIds.clear()
+                            selectedIds.addAll(inverted)
+                        },
+                    ) {
+                        Icon(Icons.Rounded.SwapVert, contentDescription = "Inverter seleção", tint = colors.textPrimary)
+                    }
+
+                    Box {
+                        IconButton(onClick = { showSmartSelectMenu = true }) {
+                            Icon(Icons.Rounded.AutoAwesome, contentDescription = "Seleção Inteligente", tint = colors.primary)
+                        }
+                        DropdownMenu(
+                            expanded = showSmartSelectMenu,
+                            onDismissRequest = { showSmartSelectMenu = false },
+                            containerColor = colors.card,
+                        ) {
+                            val firstSelected = selectedTracks.firstOrNull() ?: displayed.firstOrNull()
+                            SmartSelectionCriteria.entries.forEach { criteria ->
+                                DropdownMenuItem(
+                                    text = { Text(criteria.label, color = colors.textPrimary) },
+                                    leadingIcon = { Icon(Icons.Rounded.Checklist, contentDescription = null, tint = colors.primary) },
+                                    onClick = {
+                                        val matched = onSmartSelect(criteria, firstSelected)
+                                        selectedIds.clear()
+                                        selectedIds.addAll(matched)
+                                        showSmartSelectMenu = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    IconButton(onClick = { onBatchAddToQueue(selectedTracks); selectedIds.clear() }) {
+                        Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = "Adicionar à fila", tint = colors.primary)
+                    }
+
+                    IconButton(onClick = { onBatchAddToPlaylists(selectedIds.toList()) }) {
+                        Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = "Adicionar à playlist", tint = colors.primary)
+                    }
+
+                    IconButton(onClick = { showCreatePlaylistDialog = true }) {
+                        Icon(Icons.Rounded.Add, contentDescription = "Criar playlist com as músicas selecionadas", tint = colors.primary)
+                    }
+
+                    IconButton(onClick = { onBatchShare(selectedTracks) }) {
+                        Icon(Icons.Rounded.Share, contentDescription = "Compartilhar músicas selecionadas", tint = colors.textSecondary)
+                    }
+
+                    IconButton(onClick = { onBatchEditTags(selectedIds.toList()); selectedIds.clear() }) {
+                        Icon(Icons.Rounded.Edit, contentDescription = "Editar informações", tint = colors.textSecondary)
+                    }
+
+                    IconButton(onClick = { showDeleteConfirmDialog = true }) {
+                        Icon(Icons.Rounded.DeleteForever, contentDescription = "Excluir arquivos", tint = MaterialTheme.colorScheme.error)
+                    }
+                } else {
+                    IconButton(onClick = { onScanDuplicates(); showDuplicatesDialog = true }) {
+                        Icon(Icons.Rounded.ContentCopy, contentDescription = "Detectar duplicadas", tint = colors.textSecondary)
+                    }
+
+                    Box {
+                        IconButton(onClick = { showSortMenu = true }) {
+                            Icon(Icons.Rounded.Sort, contentDescription = "Ordenar", tint = colors.primary)
+                        }
+                        DropdownMenu(
+                            expanded = showSortMenu,
+                            onDismissRequest = { showSortMenu = false },
+                            containerColor = colors.card,
+                        ) {
+                            TrackSortOrder.entries.forEach { order ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = order.label,
+                                            color = if (sortOrder == order) colors.primary else colors.textPrimary,
+                                            fontWeight = if (sortOrder == order) FontWeight.Bold else FontWeight.Normal,
+                                        )
+                                    },
+                                    onClick = {
+                                        sortOrder = order
+                                        onSaveSortOrder(order)
+                                        showSortMenu = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Atualizar", tint = colors.primary)
+                    }
+                }
             }
-            Text(
-                text = if (isSelectionMode) "${selectedIds.size} selecionada(s)" else "Todas as músicas (${displayed.size})",
-                style = MaterialTheme.typography.titleLarge,
-                color = colors.textPrimary,
-                modifier = Modifier.weight(1f),
+
+            // Real-time Search Input
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Buscar título, artista, álbum ou pasta...") },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.primary) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { query = "" }) {
+                            Icon(Icons.Rounded.Clear, contentDescription = "Limpar busca", tint = colors.textSecondary)
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .testTag("songs_search_input"),
             )
-            if (isSelectionMode) {
-                IconButton(onClick = { onBatchAddToPlaylists(selectedIds.toList()); selectedIds.clear() }) {
-                    Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = "Adicionar às playlists", tint = colors.primary)
-                }
-                IconButton(onClick = { onBatchCreateQueue(selectedIds.toList()); selectedIds.clear() }) {
-                    Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = "Criar fila", tint = colors.primary)
-                }
-                IconButton(onClick = { onBatchEditTags(selectedIds.toList()); selectedIds.clear() }) {
-                    Icon(Icons.Rounded.Edit, contentDescription = "Editar tags em lote", tint = colors.primary)
-                }
-            } else {
-                IconButton(onClick = { onScanDuplicates(); showDuplicatesDialog = true }) {
-                    Icon(Icons.Rounded.ContentCopy, contentDescription = "Detectar duplicadas", tint = colors.textSecondary)
-                }
-                Box {
-                    IconButton(onClick = { showSortMenu = true }) {
-                        Icon(Icons.Rounded.Sort, contentDescription = "Ordenar", tint = colors.primary)
-                    }
-                    DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
-                        TrackSortOrder.entries.forEach { order ->
-                            DropdownMenuItem(
-                                text = { Text(order.label) },
-                                onClick = { sortOrder = order; showSortMenu = false },
-                            )
-                        }
-                    }
-                }
-                IconButton(onClick = onRefresh) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = "Atualizar", tint = colors.primary)
-                }
-            }
-        }
 
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = { Text("Buscar título, artista, álbum ou pasta...") },
-            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.primary) },
-            singleLine = true,
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .testTag("songs_search_input"),
-        )
-
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(availableFormats) { fmt ->
-                FilterChip(
-                    selected = formatFilter == fmt,
-                    onClick = { formatFilter = fmt },
-                    label = { Text(fmt) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = colors.primary,
-                        selectedLabelColor = Color.Black,
-                    ),
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Surface(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable(enabled = displayed.isNotEmpty()) {
-                        onPlayTracks(displayed, 0, "Todas as músicas", QueueOriginType.ALL_SONGS)
-                    },
-                shape = RoundedCornerShape(14.dp),
-                color = colors.primary,
+            // Audio format filter chips
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.Black)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Tocar tudo", color = Color.Black, fontWeight = FontWeight.Bold)
+                items(availableFormats) { fmt ->
+                    FilterChip(
+                        selected = formatFilter == fmt,
+                        onClick = {
+                            formatFilter = fmt
+                            onSaveFormatFilter(fmt)
+                        },
+                        label = { Text(fmt) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = colors.primary,
+                            selectedLabelColor = Color.Black,
+                        ),
+                    )
                 }
             }
-            Surface(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable(enabled = displayed.isNotEmpty()) {
-                        onPlayTracks(displayed.shuffled(), 0, "Aleatório Geral", QueueOriginType.ALL_SONGS)
-                    },
-                shape = RoundedCornerShape(14.dp),
-                color = colors.card,
-            ) {
-                Row(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Rounded.Shuffle, contentDescription = null, tint = colors.primary)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Aleatório", color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 140.dp),
-        ) {
-            itemsIndexed(displayed, key = { _, t -> t.id }) { index, track ->
-                val isSelected = track.id in selectedIds
-                CompactTrackRow(
-                    track = track,
-                    isCurrent = track.id == currentTrackId,
-                    isSelectionMode = isSelectionMode,
-                    isSelected = isSelected,
-                    onClick = {
-                        if (isSelectionMode) {
+            // Quick Play All & Shuffle Play Buttons
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(enabled = displayed.isNotEmpty()) {
+                            onPlayTracks(displayed, 0, "Todas as músicas", QueueOriginType.ALL_SONGS)
+                        },
+                    shape = RoundedCornerShape(14.dp),
+                    color = colors.primary,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.Black)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Tocar tudo", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(enabled = displayed.isNotEmpty()) {
+                            onPlayTracks(displayed.shuffled(), 0, "Aleatório Geral", QueueOriginType.ALL_SONGS)
+                        },
+                    shape = RoundedCornerShape(14.dp),
+                    color = colors.card,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Rounded.Shuffle, contentDescription = null, tint = colors.primary)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Aleatório", color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+
+            // Track List with quick "+ Playlist" button and selection
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .weight(1f),
+                contentPadding = PaddingValues(bottom = if (isSelectionMode) 180.dp else 140.dp),
+            ) {
+                itemsIndexed(displayed, key = { _, t -> t.id }) { index, track ->
+                    val isSelected = track.id in selectedIds
+                    CompactTrackRow(
+                        track = track,
+                        isCurrent = track.id == currentTrackId,
+                        isSelectionMode = isSelectionMode,
+                        isSelected = isSelected,
+                        onClick = {
+                            if (isSelectionMode) {
+                                if (isSelected) selectedIds.remove(track.id) else selectedIds.add(track.id)
+                            } else {
+                                onPlayTracks(displayed, index, "Todas as músicas", QueueOriginType.ALL_SONGS)
+                            }
+                        },
+                        onLongClick = {
                             if (isSelected) selectedIds.remove(track.id) else selectedIds.add(track.id)
-                        } else {
-                            onPlayTracks(displayed, index, "Todas as músicas", QueueOriginType.ALL_SONGS)
-                        }
-                    },
-                    onLongClick = {
-                        if (isSelected) selectedIds.remove(track.id) else selectedIds.add(track.id)
-                    },
-                    onMoreClick = { onTrackMoreClick(track) },
-                )
+                        },
+                        onQuickAddToPlaylist = {
+                            onBatchAddToPlaylists(listOf(track.id))
+                        },
+                        onMoreClick = { onTrackMoreClick(track) },
+                    )
+                }
             }
         }
+
+        // Sticky Bottom Bar when multiple tracks are selected
+        if (isSelectionMode) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 16.dp, vertical = 72.dp)
+                    .fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                color = colors.card,
+                tonalElevation = 8.dp,
+                shadowElevation = 10.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, colors.primary.copy(alpha = 0.5f)),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column {
+                        Text(
+                            text = "${selectedIds.size} selecionada(s)",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "Ações disponíveis",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary,
+                        )
+                    }
+                    Button(
+                        onClick = { onBatchAddToPlaylists(selectedIds.toList()) },
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Adicionar à playlist")
+                    }
+                }
+            }
+        }
+    }
+
+    if (showCreatePlaylistDialog) {
+        CreatePlaylistDialog(
+            initialName = if (query.isNotBlank()) "Playlist $query" else "Seleção (${selectedIds.size})",
+            trackCount = selectedIds.size,
+            onDismiss = { showCreatePlaylistDialog = false },
+            onConfirm = { name ->
+                onCreatePlaylistWithTracks(name, selectedIds.toList())
+                selectedIds.clear()
+            },
+        )
+    }
+
+    if (showDeleteConfirmDialog) {
+        DeleteTracksConfirmDialog(
+            tracks = selectedTracks,
+            onDismiss = { showDeleteConfirmDialog = false },
+            onConfirm = {
+                onBatchDeleteFiles(selectedTracks)
+                selectedIds.clear()
+            },
+        )
     }
 
     if (showDuplicatesDialog) {

@@ -426,6 +426,53 @@ class PlaybackController(private val context: Context) {
         updateActiveQueueTracks(currentList)
     }
 
+    fun appendTracksToActiveQueue(tracks: List<MusicTrack>) {
+        if (tracks.isEmpty()) return
+        val currentList = _playbackState.value.queueTracks.toMutableList()
+        if (currentList.isEmpty()) {
+            playTracks(tracks, 0, "Fila Principal", QueueOriginType.CUSTOM)
+            return
+        }
+        currentList.addAll(tracks)
+        updateActiveQueueTracks(currentList)
+    }
+
+    fun clearActiveQueue() {
+        val qid = _playbackState.value.activeQueue?.id ?: return
+        scope.launch(Dispatchers.IO) {
+            database.queueDao().clearQueueTracks(qid)
+            launch(Dispatchers.Main) {
+                mediaController?.clearMediaItems()
+                _playbackState.value = _playbackState.value.copy(
+                    queueTracks = emptyList(),
+                    currentIndex = -1,
+                    currentTrack = null,
+                    positionMs = 0L,
+                    durationMs = 0L,
+                    isPlaying = false,
+                )
+                pushWidgetUpdate()
+            }
+        }
+    }
+
+    fun playTrackAtIndex(index: Int) {
+        val list = _playbackState.value.queueTracks
+        if (index in list.indices) {
+            val track = list[index]
+            _playbackState.value = _playbackState.value.copy(
+                currentIndex = index,
+                currentTrack = track,
+                positionMs = 0L,
+                durationMs = track.durationMs,
+            )
+            mediaController?.seekTo(index, 0L)
+            mediaController?.play()
+            persistCurrentQueuePosition()
+            pushWidgetUpdate()
+        }
+    }
+
     fun removeTrackFromActiveQueue(index: Int) {
         val currentList = _playbackState.value.queueTracks.toMutableList()
         if (index !in currentList.indices) return

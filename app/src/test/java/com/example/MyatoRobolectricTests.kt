@@ -331,4 +331,46 @@ class MyatoRobolectricTests {
         composeRule.onNodeWithTag("create_queue_button").assertIsDisplayed()
         composeRule.onNodeWithText("Múltiplas Filas (3)").assertIsDisplayed()
     }
+
+    @Test
+    fun `playlist repository smart operations handle creation with tracks, duplicate detection, and clearing`() = runBlocking {
+        val track1 = MusicTrackEntity(
+            id = 201L, mediaStoreId = 201L, title = "Track 1", artist = "Artist", album = "Album",
+            albumId = 1L, artistId = 1L, durationMs = 100_000L, sizeBytes = 1000L,
+            filePath = "/path/1.mp3", folderPath = "/path", contentUri = "content://201",
+        )
+        val track2 = track1.copy(id = 202L, mediaStoreId = 202L, title = "Track 2")
+        val track3 = track1.copy(id = 203L, mediaStoreId = 203L, title = "Track 3")
+        db.trackDao().upsertTracks(listOf(track1, track2, track3))
+
+        val plRepo = PlaylistRepository(context, db)
+        val plId = plRepo.createPlaylistWithTracks("Rock Clássico", listOf(201L, 202L))
+
+        val initialTracks = plRepo.observePlaylistTrackIds(plId).first()
+        assertEquals(listOf(201L, 202L), initialTracks)
+
+        // Try adding with allowDuplicates = false
+        val addResultNoDup = plRepo.addTracksWithResult(listOf(plId), listOf(202L, 203L), allowDuplicates = false)
+        assertEquals(1, addResultNoDup.addedCount)
+        assertEquals(1, addResultNoDup.duplicateCount)
+        assertEquals(listOf(202L), addResultNoDup.duplicateTrackIds)
+
+        // Duplicate playlist
+        val dupId = plRepo.duplicatePlaylist(plId)
+        assertNotNull(dupId)
+        val dupTracks = plRepo.observePlaylistTrackIds(dupId!!).first()
+        assertEquals(listOf(201L, 202L, 203L), dupTracks)
+
+        // Favorite & Cover
+        plRepo.setPlaylistFavorite(plId, true)
+        plRepo.updatePlaylistCover(plId, "content://cover/art")
+        val updatedPl = plRepo.playlistsFlow.first().first { it.id == plId }
+        assertTrue(updatedPl.isFavorite)
+        assertEquals("content://cover/art", updatedPl.coverUri)
+
+        // Clear playlist
+        plRepo.clearPlaylist(plId)
+        val clearedTracks = plRepo.observePlaylistTrackIds(plId).first()
+        assertTrue(clearedTracks.isEmpty())
+    }
 }

@@ -35,7 +35,9 @@ import com.example.domain.models.MusicTrack
 import com.example.domain.models.MyatoTheme
 import com.example.domain.models.PlaybackQueue
 import com.example.domain.models.Playlist
+import com.example.domain.models.PlaylistAddResult
 import com.example.domain.models.QueueOriginType
+import com.example.domain.models.SmartSelectionCriteria
 import com.example.domain.models.TrackSortOrder
 import com.example.widgets.WidgetUpdateHelper
 import kotlinx.coroutines.flow.Flow
@@ -256,6 +258,13 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun createPlaylistWithTracks(name: String, trackIds: List<Long>, description: String = "") {
+        viewModelScope.launch {
+            app.playlistRepository.createPlaylistWithTracks(name, trackIds, description)
+            _statusMessage.value = "Playlist \"$name\" criada com ${trackIds.size} música(s)."
+        }
+    }
+
     fun renamePlaylist(playlistId: Long, newName: String) {
         viewModelScope.launch {
             app.playlistRepository.renamePlaylist(playlistId, newName)
@@ -277,9 +286,71 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun addTracksToPlaylistsWithResult(
+        playlistIds: List<Long>,
+        trackIds: List<Long>,
+        allowDuplicates: Boolean = false,
+    ) {
+        viewModelScope.launch {
+            val result = app.playlistRepository.addTracksWithResult(playlistIds, trackIds, allowDuplicates)
+            val namesStr = result.playlistNames.joinToString(", ")
+            _statusMessage.value = if (result.addedCount > 0) {
+                if (result.duplicateCount > 0) {
+                    "${result.addedCount} música(s) adicionada(s) a $namesStr (${result.duplicateCount} já existiam)."
+                } else {
+                    "${result.addedCount} música(s) adicionada(s) a $namesStr com sucesso."
+                }
+            } else if (result.duplicateCount > 0) {
+                "As músicas selecionadas já existem em $namesStr."
+            } else {
+                "Nenhuma música adicionada."
+            }
+        }
+    }
+
+    fun duplicatePlaylist(playlistId: Long) {
+        viewModelScope.launch {
+            app.playlistRepository.duplicatePlaylist(playlistId)
+            _statusMessage.value = "Playlist duplicada com sucesso."
+        }
+    }
+
+    fun clearPlaylist(playlistId: Long) {
+        viewModelScope.launch {
+            app.playlistRepository.clearPlaylist(playlistId)
+            _statusMessage.value = "Playlist esvaziada."
+        }
+    }
+
+    fun updatePlaylistCover(playlistId: Long, coverUri: String?) {
+        viewModelScope.launch {
+            app.playlistRepository.updatePlaylistCover(playlistId, coverUri)
+            _statusMessage.value = "Capa da playlist atualizada."
+        }
+    }
+
+    fun togglePlaylistFavorite(playlistId: Long, currentIsFavorite: Boolean? = null) {
+        viewModelScope.launch {
+            val isFav = currentIsFavorite ?: (playlists.value.find { it.id == playlistId }?.isFavorite == true)
+            app.playlistRepository.setPlaylistFavorite(playlistId, !isFav)
+        }
+    }
+
+    suspend fun getPlaylistTrackIdsSync(playlistId: Long): List<Long> {
+        return app.playlistRepository.getPlaylistTrackIdsSync(playlistId)
+    }
+
     fun removeTrackFromPlaylist(playlistId: Long, trackId: Long) {
         viewModelScope.launch {
             app.playlistRepository.removeTrackFromPlaylist(playlistId, trackId)
+            _statusMessage.value = "Música removida da playlist."
+        }
+    }
+
+    fun removeTracksFromPlaylist(playlistId: Long, trackIds: List<Long>) {
+        viewModelScope.launch {
+            app.playlistRepository.removeTracksFromPlaylist(playlistId, trackIds)
+            _statusMessage.value = "${trackIds.size} música(s) removida(s) da playlist."
         }
     }
 
@@ -288,6 +359,74 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
             app.playlistRepository.reorderPlaylist(playlistId, orderedTrackIds)
         }
     }
+
+    // Queue enhancements
+    fun addTracksToActiveQueue(tracksToAdd: List<MusicTrack>) {
+        playbackController.appendTracksToActiveQueue(tracksToAdd)
+        _statusMessage.value = "${tracksToAdd.size} música(s) adicionada(s) à fila."
+    }
+
+    fun addTrackNextInActiveQueue(track: MusicTrack) {
+        playbackController.addTrackNextInActiveQueue(track)
+        _statusMessage.value = "\"${track.title}\" tocará a seguir."
+    }
+
+    fun clearActiveQueue() {
+        playbackController.clearActiveQueue()
+        _statusMessage.value = "Fila de reprodução limpa."
+    }
+
+    fun playTrackAtIndexInQueue(index: Int) {
+        playbackController.playTrackAtIndex(index)
+    }
+
+    fun saveQueueAsPlaylist(name: String, trackIds: List<Long>) {
+        viewModelScope.launch {
+            app.playlistRepository.createPlaylistWithTracks(name, trackIds)
+            _statusMessage.value = "Fila salva como playlist \"$name\"."
+        }
+    }
+
+    // Permanent file & library deletion with feedback
+    fun deleteTracksPermanently(tracksToDelete: List<MusicTrack>, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            val ids = tracksToDelete.map { it.id }
+            tracksToDelete.forEach { t ->
+                val f = java.io.File(t.filePath)
+                if (f.exists()) {
+                    runCatching { f.delete() }
+                }
+            }
+            app.database.trackDao().deleteTracksByIds(ids)
+            app.database.playlistDao().removeTracksFromAllPlaylists(ids)
+            app.database.queueDao().removeTracksFromAllQueues(ids)
+            _statusMessage.value = if (tracksToDelete.size == 1) {
+                "Música \"${tracksToDelete.first().title}\" excluída do dispositivo."
+            } else {
+                "${tracksToDelete.size} músicas excluídas do dispositivo."
+            }
+            onDone()
+        }
+    }
+
+    fun setLibrarySortOrder(order: TrackSortOrder) {
+        viewModelScope.launch {
+            app.preferencesStore.setLibrarySortOrder(order)
+        }
+    }
+
+    fun setLibraryFormatFilter(format: String) {
+        viewModelScope.launch {
+            app.preferencesStore.setLibraryFormatFilter(format)
+        }
+    }
+
+    fun selectTracksByCriteria(
+        allTracksList: List<MusicTrack>,
+        criteria: SmartSelectionCriteria,
+        referenceTrack: MusicTrack? = null,
+    ): List<Long> = Companion.selectTracksByCriteria(allTracksList, criteria, referenceTrack)
+
 
     fun exportPlaylistM3u(playlistId: Long, targetUri: Uri) {
         viewModelScope.launch {
@@ -648,6 +787,45 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
                 TrackSortOrder.MOST_PLAYED -> filtered.sortedByDescending { it.playCount }
                 TrackSortOrder.LEAST_PLAYED -> filtered.sortedBy { it.playCount }
                 TrackSortOrder.RECENTLY_ADDED -> filtered.sortedByDescending { it.dateAddedSec }
+            }
+        }
+
+        fun selectTracksByCriteria(
+            allTracksList: List<MusicTrack>,
+            criteria: SmartSelectionCriteria,
+            referenceTrack: MusicTrack? = null,
+        ): List<Long> {
+            return when (criteria) {
+                SmartSelectionCriteria.BY_ARTIST -> {
+                    val refArtist = referenceTrack?.artist
+                    if (!refArtist.isNullOrBlank()) {
+                        allTracksList.filter { it.artist.equals(refArtist, ignoreCase = true) }.map { it.id }
+                    } else emptyList()
+                }
+                SmartSelectionCriteria.BY_ALBUM -> {
+                    val refAlbum = referenceTrack?.album
+                    if (!refAlbum.isNullOrBlank()) {
+                        allTracksList.filter { it.album.equals(refAlbum, ignoreCase = true) }.map { it.id }
+                    } else emptyList()
+                }
+                SmartSelectionCriteria.BY_FOLDER -> {
+                    val refFolder = referenceTrack?.folderPath
+                    if (!refFolder.isNullOrBlank()) {
+                        allTracksList.filter { it.folderPath.equals(refFolder, ignoreCase = true) }.map { it.id }
+                    } else emptyList()
+                }
+                SmartSelectionCriteria.BY_FORMAT -> {
+                    val refFormat = referenceTrack?.formatExtension
+                    if (!refFormat.isNullOrBlank()) {
+                        allTracksList.filter { it.formatExtension.equals(refFormat, ignoreCase = true) }.map { it.id }
+                    } else emptyList()
+                }
+                SmartSelectionCriteria.FAVORITES -> {
+                    allTracksList.filter { it.isFavorite }.map { it.id }
+                }
+                SmartSelectionCriteria.NEVER_PLAYED -> {
+                    allTracksList.filter { it.playCount == 0 }.map { it.id }
+                }
             }
         }
     }

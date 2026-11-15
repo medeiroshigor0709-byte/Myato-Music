@@ -9,6 +9,7 @@ import com.example.core.metadata.TagEditPayload
 import com.example.domain.models.LyricLine
 import com.example.domain.models.MusicTrack
 import com.example.domain.models.SleepTimerMode
+import com.example.domain.models.SmartSelectionCriteria
 import com.example.domain.models.TrackSortOrder
 import com.example.presentation.MyatoMainViewModel
 import kotlinx.coroutines.Dispatchers
@@ -229,5 +230,74 @@ class MyatoUnitTests {
             listOf(2L),
             MyatoMainViewModel.filterAndSortTracks(sampleTracks, TrackSortOrder.TITLE_ASC, "jazz").map { it.id },
         )
+    }
+
+    @Test
+    fun `smart selection criteria selects accurately by artist, album, folder, format, favorites and unplayed`() {
+        val tracks = listOf(
+            MusicTrack(
+                id = 10L, mediaStoreId = 10L, title = "Song A", artist = "Artist One", album = "Album X",
+                albumId = 1L, artistId = 1L, durationMs = 180_000L, sizeBytes = 1000L,
+                filePath = "/storage/music/rock/song_a.mp3", folderPath = "/storage/music/rock",
+                contentUri = "content://10", formatExtension = "MP3", isFavorite = true, playCount = 12,
+            ),
+            MusicTrack(
+                id = 20L, mediaStoreId = 20L, title = "Song B", artist = "Artist One", album = "Album Y",
+                albumId = 2L, artistId = 1L, durationMs = 210_000L, sizeBytes = 2000L,
+                filePath = "/storage/music/pop/song_b.flac", folderPath = "/storage/music/pop",
+                contentUri = "content://20", formatExtension = "FLAC", isFavorite = false, playCount = 0,
+            ),
+            MusicTrack(
+                id = 30L, mediaStoreId = 30L, title = "Song C", artist = "Artist Two", album = "Album X",
+                albumId = 1L, artistId = 2L, durationMs = 195_000L, sizeBytes = 3000L,
+                filePath = "/storage/music/rock/song_c.mp3", folderPath = "/storage/music/rock",
+                contentUri = "content://30", formatExtension = "MP3", isFavorite = true, playCount = 0,
+            ),
+        )
+
+        // BY_ARTIST using track 10 (Artist One)
+        val artistMatches = MyatoMainViewModel.selectTracksByCriteria(tracks, SmartSelectionCriteria.BY_ARTIST, tracks[0])
+        assertEquals(listOf(10L, 20L), artistMatches)
+
+        // BY_ALBUM using track 10 (Album X)
+        val albumMatches = MyatoMainViewModel.selectTracksByCriteria(tracks, SmartSelectionCriteria.BY_ALBUM, tracks[0])
+        assertEquals(listOf(10L, 30L), albumMatches)
+
+        // BY_FOLDER using track 10 (/storage/music/rock)
+        val folderMatches = MyatoMainViewModel.selectTracksByCriteria(tracks, SmartSelectionCriteria.BY_FOLDER, tracks[0])
+        assertEquals(listOf(10L, 30L), folderMatches)
+
+        // BY_FORMAT using track 20 (FLAC)
+        val formatMatches = MyatoMainViewModel.selectTracksByCriteria(tracks, SmartSelectionCriteria.BY_FORMAT, tracks[1])
+        assertEquals(listOf(20L), formatMatches)
+
+        // FAVORITES
+        val favMatches = MyatoMainViewModel.selectTracksByCriteria(tracks, SmartSelectionCriteria.FAVORITES, null)
+        assertEquals(listOf(10L, 30L), favMatches)
+
+        // NEVER_PLAYED (playCount == 0)
+        val unplayedMatches = MyatoMainViewModel.selectTracksByCriteria(tracks, SmartSelectionCriteria.NEVER_PLAYED, null)
+        assertEquals(listOf(20L, 30L), unplayedMatches)
+    }
+
+    @Test
+    fun `multi-selection inversion logic inverts correctly against displayed list`() {
+        val allIds = listOf(1L, 2L, 3L, 4L, 5L)
+        val selectedIds = mutableSetOf(2L, 4L)
+
+        val inverted = allIds.filter { it !in selectedIds }
+        assertEquals(listOf(1L, 3L, 5L), inverted)
+    }
+
+    @Test
+    fun `duplicate detection calculates duplicates and unique items accurately`() {
+        val existingInPlaylist = setOf(101L, 102L, 105L)
+        val toAdd = listOf(102L, 103L, 104L, 105L)
+
+        val duplicates = toAdd.filter { it in existingInPlaylist }
+        val uniqueToAdd = toAdd.filter { it !in existingInPlaylist }
+
+        assertEquals(listOf(102L, 105L), duplicates)
+        assertEquals(listOf(103L, 104L), uniqueToAdd)
     }
 }

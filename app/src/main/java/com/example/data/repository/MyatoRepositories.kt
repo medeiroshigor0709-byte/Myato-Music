@@ -28,6 +28,7 @@ import com.example.domain.models.MusicTrack
 import com.example.domain.models.MyatoTheme
 import com.example.domain.models.PlaybackQueue
 import com.example.domain.models.Playlist
+import com.example.domain.models.PlaylistAddResult
 import com.example.domain.models.TrackStatItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -116,6 +117,14 @@ class PlaylistRepository(
         return database.playlistDao().insertPlaylist(PlaylistEntity(name = clean, description = description))
     }
 
+    suspend fun createPlaylistWithTracks(name: String, trackIds: List<Long>, description: String = ""): Long {
+        val pid = createPlaylist(name, description)
+        if (trackIds.isNotEmpty()) {
+            database.playlistDao().replacePlaylistOrder(pid, trackIds)
+        }
+        return pid
+    }
+
     suspend fun renamePlaylist(playlistId: Long, newName: String) {
         val existing = database.playlistDao().getPlaylistById(playlistId) ?: return
         database.playlistDao().updatePlaylist(
@@ -137,8 +146,88 @@ class PlaylistRepository(
         playlistIds.forEach { pid -> addTracksToPlaylist(pid, trackIds) }
     }
 
+    suspend fun addTracksWithResult(
+        playlistIds: List<Long>,
+        trackIds: List<Long>,
+        allowDuplicates: Boolean = false,
+    ): PlaylistAddResult {
+        var totalAdded = 0
+        val duplicates = mutableListOf<Long>()
+        val playlistNames = mutableListOf<String>()
+
+        playlistIds.forEach { pid ->
+            val playlist = database.playlistDao().getPlaylistById(pid) ?: return@forEach
+            playlistNames.add(playlist.name)
+            val existing = database.playlistDao().getPlaylistEntriesSync(pid).map { it.trackId }
+            val existingSet = existing.toSet()
+
+            val toAdd = mutableListOf<Long>()
+            trackIds.forEach { tid ->
+                if (tid in existingSet && !allowDuplicates) {
+                    if (tid !in duplicates) duplicates.add(tid)
+                } else {
+                    toAdd.add(tid)
+                }
+            }
+
+            if (toAdd.isNotEmpty() || allowDuplicates) {
+                val finalOrder = existing + toAdd
+                database.playlistDao().replacePlaylistOrder(pid, finalOrder)
+                totalAdded += toAdd.size
+            }
+        }
+
+        return PlaylistAddResult(
+            playlistIds = playlistIds,
+            playlistNames = playlistNames,
+            requestedTrackIds = trackIds,
+            addedCount = totalAdded,
+            duplicateTrackIds = duplicates,
+            duplicateCount = duplicates.size,
+        )
+    }
+
+    suspend fun duplicatePlaylist(playlistId: Long): Long? {
+        val src = database.playlistDao().getPlaylistById(playlistId) ?: return null
+        val entries = database.playlistDao().getPlaylistEntriesSync(playlistId).map { it.trackId }
+        val newId = database.playlistDao().insertPlaylist(
+            src.copy(
+                id = 0L,
+                name = "${src.name} (Cópia)",
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis(),
+                lastUsedAt = System.currentTimeMillis(),
+            )
+        )
+        database.playlistDao().replacePlaylistOrder(newId, entries)
+        return newId
+    }
+
+    suspend fun clearPlaylist(playlistId: Long) {
+        database.playlistDao().clearPlaylistTracks(playlistId)
+        database.playlistDao().getPlaylistById(playlistId)?.let {
+            database.playlistDao().updatePlaylist(it.copy(updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    suspend fun updatePlaylistCover(playlistId: Long, coverUri: String?) {
+        database.playlistDao().updatePlaylistCover(playlistId, coverUri)
+    }
+
+    suspend fun setPlaylistFavorite(playlistId: Long, isFavorite: Boolean) {
+        database.playlistDao().setPlaylistFavorite(playlistId, isFavorite)
+    }
+
+    suspend fun getPlaylistTrackIdsSync(playlistId: Long): List<Long> {
+        return database.playlistDao().getPlaylistEntriesSync(playlistId).map { it.trackId }
+    }
+
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: Long) {
         database.playlistDao().removeTrackFromPlaylist(playlistId, trackId)
+    }
+
+    suspend fun removeTracksFromPlaylist(playlistId: Long, trackIds: List<Long>) {
+        database.playlistDao().removeTracksFromPlaylist(playlistId, trackIds)
     }
 
     suspend fun reorderPlaylist(playlistId: Long, orderedTrackIds: List<Long>) {

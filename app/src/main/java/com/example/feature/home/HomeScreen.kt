@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material3.Button
@@ -138,6 +139,35 @@ fun HomeScreen(
                     } else {
                         Icon(Icons.Rounded.Refresh, contentDescription = "Atualizar biblioteca", tint = colors.primary)
                     }
+                }
+            }
+        }
+
+        // Quick Search Bar
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .clickable { onOpenAllSongs() }
+                    .testTag("home_quick_search_card"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.card),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.primary)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = "Buscar músicas, artistas, álbuns...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
         }
