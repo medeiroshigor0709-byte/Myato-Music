@@ -39,12 +39,12 @@ jobs:
           accept-android-sdk-licenses: true
           packages: ""
 
-      - name: Inspect SDK Catalog & Install Required Android Packages
+      - name: Configure SDK Environment & Query Remote Catalog
         run: |
           set -euo pipefail
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
           if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
-            echo "::error::Neither ANDROID_HOME nor ANDROID_SDK_ROOT points to a valid Android SDK directory."
+            echo "::error::Neither ANDROID_HOME nor ANDROID_SDK_ROOT points to an existing directory."
             exit 1
           fi
 
@@ -53,70 +53,122 @@ jobs:
           echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/build-tools/36.0.0" >> "$GITHUB_PATH"
 
-          echo "=== sdkmanager --version ==="
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          which sdkmanager
           sdkmanager --version
 
-          echo "=== Accepting Android SDK licenses ==="
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          CATALOG_FILE="/tmp/android-sdk-catalog.txt"
+          rm -f "$CATALOG_FILE"
+          sdkmanager --list > "$CATALOG_FILE"
 
-          echo "=== Checking remote SDK catalog (sdkmanager --list) ==="
-          CATALOG="$(sdkmanager --list 2>&1)"
-          echo "$CATALOG" | grep -E "platform-tools|platforms;android-36|build-tools;36\.0\.0" || true
+          python3 - "$CATALOG_FILE" << 'PYEOF'
+          import sys
 
-          for pkg in "platform-tools" "platforms;android-36" "build-tools;36.0.0"; do
-            if ! printf '%s\n' "$CATALOG" | grep -Eq "^[[:space:]]*${pkg}([[:space:]]|\|)"; then
-              echo "::error::Package '${pkg}' was NOT found in sdkmanager --list remote catalog."
-              echo "=== Full sdkmanager --list output for diagnosis ==="
-              printf '%s\n' "$CATALOG"
-              exit 1
-            fi
-          done
+          catalog_path = sys.argv[1]
+          with open(catalog_path, "r", encoding="utf-8", errors="replace") as f:
+              raw = f.read()
 
-          echo "=== Installing stable Android SDK packages ==="
-          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          required = ("platform-tools", "platforms;android-36", "build-tools;36.0.0")
+          found = {}
+          for line in raw.replace("\r", "\n").splitlines():
+              stripped = line.strip()
+              if not stripped or stripped.startswith("[") or stripped.startswith("---"):
+                  continue
+              pkg_id = stripped.split("|", 1)[0].strip()
+              if pkg_id in required:
+                  found.setdefault(pkg_id, []).append(stripped)
 
-      - name: Validate Toolchain & Installed SDK Components
+          print("=== Required packages in sdkmanager --list ===")
+          for pkg in required:
+              entries = found.get(pkg, [])
+              if entries:
+                  for entry in entries:
+                      print(f"FOUND: {entry}")
+              else:
+                  print(f"MISSING: {pkg}")
+
+          missing = [pkg for pkg in required if pkg not in found]
+          if missing:
+              sys.stderr.write(f"::error::Required packages missing from sdkmanager --list catalog: {', '.join(missing)}\n")
+              sys.exit(1)
+          PYEOF
+          rm -f "$CATALOG_FILE"
+
+      - name: Accept Android SDK Licenses
+        run: |
+          set -euo pipefail
+          YES_FILE="/tmp/sdk-yes.txt"
+          python3 -c 'print("y\n" * 50, end="")' > "$YES_FILE"
+          sdkmanager --licenses < "$YES_FILE"
+          rm -f "$YES_FILE"
+
+      - name: Install Android SDK platform-tools
+        run: sdkmanager --install "platform-tools"
+
+      - name: Install Android SDK platforms;android-36
+        run: sdkmanager --install "platforms;android-36"
+
+      - name: Install Android SDK build-tools;36.0.0
+        run: sdkmanager --install "build-tools;36.0.0"
+
+      - name: Verify Installed SDK Components & Directories
         run: |
           set -euo pipefail
           echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unset}"
 
           if [ -z "${ANDROID_HOME:-}" ] || [ -z "${ANDROID_SDK_ROOT:-}" ] || [ "$ANDROID_HOME" != "$ANDROID_SDK_ROOT" ]; then
-            echo "::error::ANDROID_HOME and ANDROID_SDK_ROOT must both be set and point to the same SDK root."
+            echo "::error::ANDROID_HOME and ANDROID_SDK_ROOT must both point to the same SDK directory."
             exit 1
           fi
 
-          for required_path in \
+          for required_dir in \
+            "$ANDROID_HOME/platform-tools" \
+            "$ANDROID_HOME/platforms/android-36" \
+            "$ANDROID_HOME/build-tools/36.0.0"; do
+            if [ ! -d "$required_dir" ]; then
+              echo "::error::Required SDK directory missing: $required_dir"
+              exit 1
+            fi
+            echo "Verified directory: $required_dir"
+          done
+
+          for required_file in \
             "$ANDROID_HOME/platform-tools/adb" \
             "$ANDROID_HOME/platforms/android-36/android.jar" \
             "$ANDROID_HOME/build-tools/36.0.0/apksigner"; do
-            if [ ! -e "$required_path" ]; then
-              echo "::error::Missing required SDK component: $required_path"
-              ls -la "$ANDROID_HOME" || true
+            if [ ! -e "$required_file" ]; then
+              echo "::error::Required SDK file missing: $required_file"
               exit 1
             fi
+            echo "Verified file: $required_file"
           done
 
-          echo "=== java -version ==="
-          java -version
-          echo "=== sdkmanager --version ==="
-          sdkmanager --version
-          echo "=== sdkmanager --list_installed ==="
           sdkmanager --list_installed
-          echo "=== adb version ==="
-          adb version
 
+      - name: Validate Toolchain (Java, Gradle Wrapper, ADB)
+        run: |
+          set -euo pipefail
+          java -version
           chmod +x gradlew
-          echo "=== ./gradlew --version ==="
           ./gradlew --version
+          adb version
 
       - name: Ensure debug.keystore is available
         run: |
           set -euo pipefail
           if [ ! -f debug.keystore ]; then
             if [ -f debug.keystore.base64 ]; then
-              tr -d '\n\r ' < debug.keystore.base64 | base64 --decode > debug.keystore
+              python3 -c '
+          import base64
+          with open("debug.keystore.base64", "r", encoding="utf-8") as src:
+              raw = "".join(src.read().split())
+          with open("debug.keystore", "wb") as dst:
+              dst.write(base64.b64decode(raw))
+          '
               echo "Restored debug.keystore from debug.keystore.base64"
             else
               keytool -genkeypair -v \
@@ -137,7 +189,7 @@ jobs:
         run: ./gradlew clean --no-daemon
 
       - name: Run Unit & Robolectric Tests
-        run: ./gradlew :app:testDebugUnitTest --no-daemon
+        run: ./gradlew testDebugUnitTest --no-daemon
 
       - name: Upload Test Reports
         if: always()
@@ -151,7 +203,7 @@ jobs:
       - name: Build Debug APK
         run: |
           set -euo pipefail
-          ./gradlew :app:assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon
           mkdir -p dist
           DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
           if [ ! -f "$DEBUG_APK" ]; then
@@ -197,7 +249,12 @@ jobs:
             exit 0
           fi
 
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '\n\r ' | base64 --decode > "$ORIG_KS"
+          python3 - "$ORIG_KS" << 'PYEOF'
+          import base64, os, sys
+          raw = "".join(os.environ["ANDROID_KEYSTORE_BASE64"].split())
+          with open(sys.argv[1], "wb") as f:
+              f.write(base64.b64decode(raw))
+          PYEOF
           cp "$ORIG_KS" "$GRADLE_KS"
 
           if ! keytool -list \
@@ -215,7 +272,7 @@ jobs:
           KEYSTORE_PATH="$GRADLE_KS" \
           STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD" \
           KEY_PASSWORD="$ANDROID_KEY_PASSWORD" \
-          ./gradlew :app:assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon
 
           RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
           if [ ! -f "$RELEASE_APK" ]; then
