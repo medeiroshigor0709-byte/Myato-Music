@@ -199,11 +199,15 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         }
         return when (sortOrder) {
             TrackSortOrder.TITLE_ASC -> filtered.sortedBy { it.title.lowercase() }
+            TrackSortOrder.TITLE_DESC -> filtered.sortedByDescending { it.title.lowercase() }
             TrackSortOrder.ARTIST_ASC -> filtered.sortedBy { it.artist.lowercase() }
             TrackSortOrder.ALBUM_ASC -> filtered.sortedBy { it.album.lowercase() }
             TrackSortOrder.DURATION_DESC -> filtered.sortedByDescending { it.durationMs }
             TrackSortOrder.DATE_ADDED_DESC -> filtered.sortedByDescending { it.dateAddedSec }
+            TrackSortOrder.DATE_ADDED_ASC -> filtered.sortedBy { it.dateAddedSec }
             TrackSortOrder.MOST_PLAYED -> filtered.sortedByDescending { it.playCount }
+            TrackSortOrder.LEAST_PLAYED -> filtered.sortedBy { it.playCount }
+            TrackSortOrder.RECENTLY_ADDED -> filtered.sortedByDescending { it.dateAddedSec }
         }
     }
 
