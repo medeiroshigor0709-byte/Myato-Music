@@ -30,7 +30,7 @@ import kotlinx.coroutines.launch
         AppSettingsEntity::class,
         BackupMetadataEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class MyatoDatabase : RoomDatabase() {
@@ -48,12 +48,35 @@ abstract class MyatoDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: MyatoDatabase? = null
 
-        /**
-         * Explicit forward migration scaffold prepared for future database schema updates.
-         */
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // Prepared for future schema extensions without destructive fallback.
+                db.execSQL("ALTER TABLE playlists ADD COLUMN coverUri TEXT")
+                db.execSQL("ALTER TABLE playlists ADD COLUMN lastUsedAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE playlists ADD COLUMN isFavorite INTEGER NOT NULL DEFAULT 0")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS playlist_tracks_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        playlistId INTEGER NOT NULL,
+                        trackId INTEGER NOT NULL,
+                        position INTEGER NOT NULL,
+                        addedAt INTEGER NOT NULL,
+                        FOREIGN KEY(playlistId) REFERENCES playlists(id) ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO playlist_tracks_new (playlistId, trackId, position, addedAt)
+                    SELECT playlistId, trackId, position, addedAt FROM playlist_tracks
+                    ORDER BY playlistId ASC, position ASC
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE playlist_tracks")
+                db.execSQL("ALTER TABLE playlist_tracks_new RENAME TO playlist_tracks")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_playlist_tracks_playlistId ON playlist_tracks(playlistId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_playlist_tracks_trackId ON playlist_tracks(trackId)")
             }
         }
 

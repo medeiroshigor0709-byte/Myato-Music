@@ -75,10 +75,23 @@ data class Playlist(
     val id: Long,
     val name: String,
     val description: String = "",
+    val coverUri: String? = null,
+    val isFavorite: Boolean = false,
+    val lastUsedAt: Long = 0L,
     val trackCount: Int = 0,
     val totalDurationMs: Long = 0L,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
+)
+
+@Serializable
+data class PlaylistAddResult(
+    val playlistIds: List<Long>,
+    val playlistNames: List<String>,
+    val requestedTrackIds: List<Long>,
+    val addedCount: Int,
+    val duplicateTrackIds: List<Long>,
+    val duplicateCount: Int,
 )
 
 @Serializable
@@ -308,12 +321,25 @@ data class BackupPreview(
 )
 
 enum class TrackSortOrder(val label: String) {
-    TITLE_ASC("Título (A-Z)"),
+    TITLE_ASC("Nome crescente (A-Z)"),
+    TITLE_DESC("Nome decrescente (Z-A)"),
     ARTIST_ASC("Artista"),
     ALBUM_ASC("Álbum"),
     DURATION_DESC("Duração"),
     DATE_ADDED_DESC("Mais recentes"),
-    MOST_PLAYED("Mais reproduzidas")
+    DATE_ADDED_ASC("Mais antigas"),
+    MOST_PLAYED("Mais reproduzidas"),
+    LEAST_PLAYED("Menos reproduzidas"),
+    RECENTLY_ADDED("Adicionadas recentemente"),
+}
+
+enum class SmartSelectionCriteria(val label: String) {
+    BY_ARTIST("Todas do mesmo artista"),
+    BY_ALBUM("Todas do mesmo álbum"),
+    BY_FOLDER("Todas da mesma pasta"),
+    BY_FORMAT("Mesmo formato de áudio"),
+    FAVORITES("Músicas favoritas"),
+    NEVER_PLAYED("Músicas nunca reproduzidas"),
 }
 
 enum class HeadsetButtonMapping(val label: String) {

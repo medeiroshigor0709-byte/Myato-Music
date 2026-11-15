@@ -43,6 +43,9 @@ interface TrackDao {
     @Query("DELETE FROM music_tracks WHERE id = :trackId")
     suspend fun deleteTrackById(trackId: Long)
 
+    @Query("DELETE FROM music_tracks WHERE id IN (:trackIds)")
+    suspend fun deleteTracksByIds(trackIds: List<Long>)
+
     @Query("DELETE FROM music_tracks WHERE id NOT IN (:activeIds)")
     suspend fun deleteTracksNotIn(activeIds: List<Long>)
 
@@ -108,13 +111,28 @@ interface PlaylistDao {
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackId = :trackId")
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: Long)
 
+    @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackId IN (:trackIds)")
+    suspend fun removeTracksFromPlaylist(playlistId: Long, trackIds: List<Long>)
+
+    @Query("DELETE FROM playlist_tracks WHERE trackId IN (:trackIds)")
+    suspend fun removeTracksFromAllPlaylists(trackIds: List<Long>)
+
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId")
     suspend fun clearPlaylistTracks(playlistId: Long)
+
+    @Query("UPDATE playlists SET lastUsedAt = :timestamp, updatedAt = :timestamp WHERE id = :playlistId")
+    suspend fun touchPlaylistLastUsed(playlistId: Long, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE playlists SET coverUri = :coverUri, updatedAt = :timestamp WHERE id = :playlistId")
+    suspend fun updatePlaylistCover(playlistId: Long, coverUri: String?, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE playlists SET isFavorite = :isFavorite, updatedAt = :timestamp WHERE id = :playlistId")
+    suspend fun setPlaylistFavorite(playlistId: Long, isFavorite: Boolean, timestamp: Long = System.currentTimeMillis())
 
     @Transaction
     suspend fun replacePlaylistOrder(playlistId: Long, orderedTrackIds: List<Long>) {
         clearPlaylistTracks(playlistId)
-        val entries = orderedTrackIds.distinct().mapIndexed { index, trackId ->
+        val entries = orderedTrackIds.mapIndexed { index, trackId ->
             PlaylistTrackEntity(
                 playlistId = playlistId,
                 trackId = trackId,
@@ -123,7 +141,8 @@ interface PlaylistDao {
         }
         if (entries.isNotEmpty()) upsertPlaylistTracks(entries)
         getPlaylistById(playlistId)?.let {
-            updatePlaylist(it.copy(updatedAt = System.currentTimeMillis()))
+            val now = System.currentTimeMillis()
+            updatePlaylist(it.copy(updatedAt = now, lastUsedAt = now))
         }
     }
 }
@@ -174,6 +193,9 @@ interface QueueDao {
 
     @Query("DELETE FROM queue_tracks WHERE queueId = :queueId")
     suspend fun clearQueueTracks(queueId: Long)
+
+    @Query("DELETE FROM queue_tracks WHERE trackId IN (:trackIds)")
+    suspend fun removeTracksFromAllQueues(trackIds: List<Long>)
 
     @Transaction
     suspend fun replaceQueueTracks(queueId: Long, trackIds: List<Long>) {

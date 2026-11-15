@@ -12,6 +12,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.core.designsystem.BuiltInThemes
 import com.example.domain.models.HeadsetButtonMapping
+import com.example.domain.models.TrackSortOrder
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -35,6 +36,8 @@ data class AppUserPreferences(
     val notificationShowPlaylistButton: Boolean = true,
     val autoBackupIntervalDays: Int = 0, // 0 = disabled, 1 = daily, 7 = weekly
     val autoBackupDirectoryUri: String = "",
+    val savedSortOrder: TrackSortOrder = TrackSortOrder.TITLE_ASC,
+    val savedFormatFilter: String = "Todas",
 )
 
 class AppPreferencesStore(private val context: Context) {
@@ -57,6 +60,8 @@ class AppPreferencesStore(private val context: Context) {
         val NOTIF_PLAYLIST_BTN = booleanPreferencesKey("notif_playlist_btn")
         val AUTO_BACKUP_DAYS = intPreferencesKey("auto_backup_days")
         val AUTO_BACKUP_URI = stringPreferencesKey("auto_backup_uri")
+        val LIBRARY_SORT_ORDER = stringPreferencesKey("library_sort_order")
+        val LIBRARY_FORMAT_FILTER = stringPreferencesKey("library_format_filter")
     }
 
     val preferencesFlow: Flow<AppUserPreferences> = context.myatoDataStore.data.map { prefs ->
@@ -78,11 +83,17 @@ class AppPreferencesStore(private val context: Context) {
             notificationShowPlaylistButton = prefs[Keys.NOTIF_PLAYLIST_BTN] ?: true,
             autoBackupIntervalDays = prefs[Keys.AUTO_BACKUP_DAYS] ?: 0,
             autoBackupDirectoryUri = prefs[Keys.AUTO_BACKUP_URI] ?: "",
+            savedSortOrder = parseSortOrder(prefs[Keys.LIBRARY_SORT_ORDER]),
+            savedFormatFilter = prefs[Keys.LIBRARY_FORMAT_FILTER] ?: "Todas",
         )
     }
 
     private fun parseMapping(raw: String?, fallback: HeadsetButtonMapping): HeadsetButtonMapping {
         return raw?.let { runCatching { HeadsetButtonMapping.valueOf(it) }.getOrNull() } ?: fallback
+    }
+
+    private fun parseSortOrder(raw: String?): TrackSortOrder {
+        return raw?.let { runCatching { TrackSortOrder.valueOf(it) }.getOrNull() } ?: TrackSortOrder.TITLE_ASC
     }
 
     suspend fun setOnboardingDone(done: Boolean) {
@@ -142,6 +153,18 @@ class AppPreferencesStore(private val context: Context) {
         context.myatoDataStore.edit {
             it[Keys.AUTO_BACKUP_DAYS] = intervalDays
             it[Keys.AUTO_BACKUP_URI] = directoryUri
+        }
+    }
+
+    suspend fun setLibrarySortOrder(order: TrackSortOrder) {
+        context.myatoDataStore.edit {
+            it[Keys.LIBRARY_SORT_ORDER] = order.name
+        }
+    }
+
+    suspend fun setLibraryFormatFilter(format: String) {
+        context.myatoDataStore.edit {
+            it[Keys.LIBRARY_FORMAT_FILTER] = format
         }
     }
 }

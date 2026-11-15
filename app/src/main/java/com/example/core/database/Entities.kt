@@ -77,13 +77,15 @@ data class PlaylistEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val name: String,
     val description: String = "",
+    val coverUri: String? = null,
+    val lastUsedAt: Long = 0L,
+    val isFavorite: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
 )
 
 @Entity(
     tableName = "playlist_tracks",
-    primaryKeys = ["playlistId", "trackId"],
     foreignKeys = [
         ForeignKey(
             entity = PlaylistEntity::class,
@@ -98,6 +100,7 @@ data class PlaylistEntity(
     ]
 )
 data class PlaylistTrackEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val playlistId: Long,
     val trackId: Long,
     val position: Int,

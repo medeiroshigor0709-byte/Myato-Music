@@ -34,6 +34,9 @@ data class BackupPlaylistDto(
     val description: String,
     val trackIds: List<Long>,
     val createdAt: Long,
+    val coverUri: String? = null,
+    val isFavorite: Boolean = false,
+    val lastUsedAt: Long = 0L,
 )
 
 @Serializable
@@ -135,6 +138,9 @@ class BackupManager(
                     description = p.description,
                     trackIds = playlistEntries[p.id]?.sortedBy { it.position }?.map { it.trackId }.orEmpty(),
                     createdAt = p.createdAt,
+                    coverUri = p.coverUri,
+                    isFavorite = p.isFavorite,
+                    lastUsedAt = p.lastUsedAt,
                 )
             },
             queues = queues.map { q ->
@@ -254,6 +260,9 @@ class BackupManager(
                         PlaylistEntity(
                             name = p.name,
                             description = p.description,
+                            coverUri = p.coverUri,
+                            isFavorite = p.isFavorite,
+                            lastUsedAt = p.lastUsedAt,
                             createdAt = p.createdAt,
                         )
                     )

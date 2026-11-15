@@ -102,10 +102,14 @@ fun ArtistEntity.toDomain(): ArtistItem = ArtistItem(
 fun PlaylistEntity.toDomain(
     trackCount: Int = 0,
     totalDurationMs: Long = 0L,
+    fallbackArtUri: String? = null,
 ): Playlist = Playlist(
     id = id,
     name = name,
     description = description,
+    coverUri = coverUri ?: fallbackArtUri,
+    isFavorite = isFavorite,
+    lastUsedAt = lastUsedAt,
     trackCount = trackCount,
     totalDurationMs = totalDurationMs,
     createdAt = createdAt,
