@@ -61,6 +61,7 @@ import com.example.core.common.TimeFormatter
 import com.example.core.designsystem.AlbumArtwork
 import com.example.core.designsystem.CompactTrackRow
 import com.example.core.designsystem.LocalMyatoColors
+import com.example.core.designsystem.MyatoCompactBrandBadge
 import com.example.core.designsystem.SectionHeader
 import com.example.domain.models.ListeningStatsSummary
 import com.example.domain.models.MusicTrack
@@ -111,13 +112,9 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
-                    Text(
-                        text = "MYATO MUSIC",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = colors.primary,
-                        fontWeight = FontWeight.Bold,
-                    )
+                Column(modifier = Modifier.weight(1f)) {
+                    MyatoCompactBrandBadge(symbolSize = 34.dp)
+                    Spacer(Modifier.height(6.dp))
                     Text(
                         text = "${tracks.size} músicas locais • ${TimeFormatter.formatHoursMinutes(statsSummary.totalListenMs)} ouvidas",
                         style = MaterialTheme.typography.bodyMedium,

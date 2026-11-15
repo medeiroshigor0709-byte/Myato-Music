@@ -68,7 +68,8 @@ import com.example.core.database.AppUserPreferences
 import com.example.core.database.BackupMetadataEntity
 import com.example.core.designsystem.AlbumArtwork
 import com.example.core.designsystem.LocalMyatoColors
-import com.example.core.designsystem.MyatoLogoSymbol
+import com.example.core.designsystem.MyatoCompactBrandBadge
+import com.example.core.designsystem.MyatoOfficialBrandLockup
 import com.example.domain.models.AlbumItem
 import com.example.domain.models.ArtistItem
 import com.example.domain.models.AudioFormatCapability
@@ -471,7 +472,14 @@ fun SettingsScreen(
             .testTag("settings_screen"),
     ) {
         Spacer(Modifier.height(14.dp))
-        Text("Configurações", style = MaterialTheme.typography.headlineMedium, color = colors.textPrimary, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Configurações", style = MaterialTheme.typography.headlineMedium, color = colors.textPrimary, fontWeight = FontWeight.Bold)
+            MyatoCompactBrandBadge(symbolSize = 28.dp)
+        }
         Spacer(Modifier.height(12.dp))
 
         SettingToggleCard("Reprodução sem intervalos (Gapless)", "Transição contínua entre faixas da fila.", preferences.gaplessEnabled, onSetGapless)
@@ -632,9 +640,13 @@ fun AboutScreen(onBack: () -> Unit) {
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            MyatoLogoSymbol(modifier = Modifier.size(84.dp), tint = colors.primary, accent = colors.textPrimary)
+            MyatoOfficialBrandLockup(
+                symbolSize = 96.dp,
+                animateBars = true,
+                showGlow = true,
+                useContrastCardOnLightTheme = true,
+            )
             Spacer(Modifier.height(14.dp))
-            Text("MYATO MUSIC", style = MaterialTheme.typography.headlineLarge, color = colors.primary, fontWeight = FontWeight.Bold)
             Text("Sua música. Seu estilo. Sua experiência.", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
             Spacer(Modifier.height(6.dp))
             Text("Versão 1.0.0 • Build Offline", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)

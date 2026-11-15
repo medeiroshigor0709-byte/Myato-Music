@@ -68,69 +68,75 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
 import com.example.R
 import com.example.core.designsystem.LocalMyatoColors
-import com.example.core.designsystem.MyatoLogoSymbol
-import com.example.core.designsystem.MyatoOrange
+import com.example.core.designsystem.MyatoBrandBlack
+import com.example.core.designsystem.MyatoBrandBlackSecondary
+import com.example.core.designsystem.MyatoBrandOrange
+import com.example.core.designsystem.MyatoBrandOrangeVibrant
+import com.example.core.designsystem.MyatoCompactBrandBadge
+import com.example.core.designsystem.MyatoOfficialBrandLockup
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
- * 1. Splash Screen: Completely orange (#FF8500) background, centered logo, original MYATO musical symbol,
- * minimalist aesthetic, smooth transition.
+ * 1. Splash Screen: Deep black (#050505) background, subtle orange aura,
+ * official MYATO MUSIC logo with animated equalizer bars, crisp entrance, fast handoff.
  */
 @Composable
 fun SplashScreen(
     onFinished: () -> Unit,
 ) {
-    val scale = remember { Animatable(0.76f) }
+    val scale = remember { Animatable(0.88f) }
     val alpha = remember { Animatable(0f) }
 
     LaunchedEffect(Unit) {
-        scale.animateTo(1f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy))
-        alpha.animateTo(1f, animationSpec = tween(350))
-        delay(850L)
+        val scaleJob = launch {
+            scale.animateTo(
+                1f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow,
+                ),
+            )
+        }
+        val alphaJob = launch {
+            alpha.animateTo(1f, animationSpec = tween(durationMillis = 280))
+        }
+        scaleJob.join()
+        alphaJob.join()
+        delay(550L)
         onFinished()
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MyatoOrange)
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        MyatoBrandOrange.copy(alpha = 0.14f),
+                        MyatoBrandOrangeVibrant.copy(alpha = 0.04f),
+                        MyatoBrandBlackSecondary.copy(alpha = 0.45f),
+                        MyatoBrandBlack,
+                    ),
+                ),
+            )
+            .background(MyatoBrandBlack.copy(alpha = 0.35f))
+            .safeDrawingPadding()
             .testTag("splash_screen"),
         contentAlignment = Alignment.Center,
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
+        Box(
             modifier = Modifier
                 .scale(scale.value)
                 .alpha(alpha.value)
                 .padding(32.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(116.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.14f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                MyatoLogoSymbol(
-                    modifier = Modifier.size(72.dp),
-                    tint = Color.White,
-                    accent = Color(0xFF111111),
-                )
-            }
-            Spacer(Modifier.height(22.dp))
-            Text(
-                text = stringResource(R.string.app_name),
-                style = MaterialTheme.typography.displayLarge,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = stringResource(R.string.app_slogan),
-                style = MaterialTheme.typography.bodyLarge,
-                color = Color(0xFF111111),
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
+            MyatoOfficialBrandLockup(
+                symbolSize = 128.dp,
+                animateBars = true,
+                showGlow = true,
+                useContrastCardOnLightTheme = false,
             )
         }
     }
@@ -175,14 +181,12 @@ fun OnboardingScreen(
                         .height(220.dp)
                         .clip(RoundedCornerShape(24.dp)),
                 )
-                Spacer(Modifier.height(24.dp))
-                Text(
-                    text = "MYATO MUSIC",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = colors.primary,
-                    fontWeight = FontWeight.Bold,
+                Spacer(Modifier.height(22.dp))
+                MyatoCompactBrandBadge(
+                    symbolSize = 40.dp,
+                    animateBars = true,
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(10.dp))
                 Text(
                     text = stringResource(R.string.app_slogan),
                     style = MaterialTheme.typography.titleMedium,

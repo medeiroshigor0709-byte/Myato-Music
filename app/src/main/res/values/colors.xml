@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="myato_brand_black">#FF050505</color>
+    <color name="myato_brand_black_secondary">#FF111111</color>
+    <color name="myato_brand_orange">#FFFF8A00</color>
+    <color name="myato_brand_orange_vibrant">#FFFF6A00</color>
+    <color name="myato_brand_orange_light">#FFFFB000</color>
+    <color name="myato_brand_amber">#FFD95B00</color>
     <color name="myato_orange">#FFFF8500</color>
     <color name="myato_orange_secondary">#FFFF9D24</color>
-    <color name="myato_black">#FF000000</color>
+    <color name="myato_black">#FF050505</color>
     <color name="myato_surface">#FF111111</color>
     <color name="myato_card">#FF1C1C1C</color>
     <color name="white">#FFFFFFFF</color>

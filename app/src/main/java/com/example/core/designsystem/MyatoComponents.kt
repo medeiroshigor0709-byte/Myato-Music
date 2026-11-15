@@ -113,54 +113,19 @@ import com.example.domain.models.MusicTrack
 import com.example.domain.models.Playlist
 
 /**
- * Original geometric MYATO MUSIC brand emblem drawn via Compose Canvas.
+ * Official MYATO MUSIC brand emblem (delegates to MyatoOfficialSymbol for invariant brand identity).
  */
 @Composable
 fun MyatoLogoSymbol(
     modifier: Modifier = Modifier,
-    tint: Color = Color.White,
-    accent: Color = Color.Black,
+    @Suppress("UNUSED_PARAMETER") tint: Color = MyatoBrandWhite,
+    @Suppress("UNUSED_PARAMETER") accent: Color = MyatoBrandOrange,
 ) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val stroke = w * 0.11f
-
-        // Stylized M-shaped soundwave
-        val path = Path().apply {
-            moveTo(w * 0.14f, h * 0.78f)
-            lineTo(w * 0.14f, h * 0.30f)
-            lineTo(w * 0.50f, h * 0.60f)
-            lineTo(w * 0.86f, h * 0.30f)
-            lineTo(w * 0.86f, h * 0.78f)
-        }
-        drawPath(
-            path = path,
-            color = tint,
-            style = Stroke(width = stroke, cap = StrokeCap.Round),
-        )
-
-        // Centered floating musical stem & dot
-        drawLine(
-            color = accent,
-            start = Offset(w * 0.50f, h * 0.14f),
-            end = Offset(w * 0.50f, h * 0.44f),
-            strokeWidth = stroke * 0.72f,
-            cap = StrokeCap.Round,
-        )
-        drawLine(
-            color = accent,
-            start = Offset(w * 0.50f, h * 0.14f),
-            end = Offset(w * 0.68f, h * 0.22f),
-            strokeWidth = stroke * 0.72f,
-            cap = StrokeCap.Round,
-        )
-        drawCircle(
-            color = accent,
-            radius = stroke * 0.65f,
-            center = Offset(w * 0.45f, h * 0.44f),
-        )
-    }
+    MyatoOfficialSymbol(
+        modifier = modifier,
+        animateBars = false,
+        showOuterGlow = true,
+    )
 }
 
 @Composable

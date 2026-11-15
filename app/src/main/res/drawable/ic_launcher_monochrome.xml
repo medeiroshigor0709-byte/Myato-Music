@@ -4,7 +4,16 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Equalizer bars in background (inside 66dp safe zone: x=28..80, y=28..80) -->
+    <path
+        android:fillColor="#80FFFFFF"
+        android:pathData="M29,60 h4 v16 h-4 z M36,52 h4 v24 h-4 z M43,46 h4 v30 h-4 z M50,55 h4 v21 h-4 z M57,49 h4 v27 h-4 z M64,58 h4 v18 h-4 z" />
+    <!-- Sharp angular M soundwave -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M28,72 L28,40 L37,40 L54,58 L71,40 L80,40 L80,72 L72,72 L72,52 L54,70 L36,52 L36,72 Z M50,26 L62,26 L62,33 L54,33 L54,48 C54,50.5 51.8,52.5 49,52.5 C46.2,52.5 44,50.5 44,48 C44,45.5 46.2,43.5 49,43.5 C50,43.5 50.8,43.8 51.5,44.2 L51.5,26 Z" />
+        android:pathData="M29,74 L29,40 L35,40 L48,57 L61,40 L67,40 L67,74 L61,74 L61,51 L48,67 L35,51 L35,74 Z" />
+    <!-- Stylized musical note to the right -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M73,32 L81,36 L81,41 L75,38.5 L75,64 C75,67.5 72.2,70 68.8,70 C65.4,70 62.6,67.5 62.6,64 C62.6,60.5 65.4,58 68.8,58 C69.9,58 70.8,58.3 71.6,58.8 L71.6,32 Z" />
 </vector>

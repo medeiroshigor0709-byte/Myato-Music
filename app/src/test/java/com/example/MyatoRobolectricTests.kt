@@ -446,4 +446,44 @@ class MyatoRobolectricTests {
         }
         assertEquals(0, nextIndex)
     }
+
+    @Test
+    fun `official launcher icon and brand drawables resolve cleanly`() {
+        assertNotNull(androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_myato_official_logo))
+        assertNotNull(androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_launcher_foreground))
+        assertNotNull(androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_launcher_background))
+        assertNotNull(androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_launcher_monochrome))
+        assertNotNull(androidx.core.content.ContextCompat.getDrawable(context, R.mipmap.ic_launcher))
+        assertNotNull(androidx.core.content.ContextCompat.getDrawable(context, R.mipmap.ic_launcher_round))
+    }
+
+    @Test
+    fun `splash screen displays official MYATO MUSIC brand lockup on deep black canvas`() {
+        composeRule.mainClock.autoAdvance = false
+        composeRule.setContent {
+            MyatoMusicTheme(activeTheme = BuiltInThemes.MidnightOrange) {
+                com.example.feature.home.SplashScreen(onFinished = {})
+            }
+        }
+        composeRule.mainClock.advanceTimeBy(320L)
+        composeRule.onNodeWithTag("splash_screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("myato_official_brand_lockup").assertIsDisplayed()
+        composeRule.onNodeWithText("MYATO").assertIsDisplayed()
+        composeRule.onNodeWithText("MUSIC").assertIsDisplayed()
+    }
+
+    @Test
+    fun `about screen keeps official brand lockup visible across light and dark themes`() {
+        composeRule.setContent {
+            MyatoMusicTheme(activeTheme = BuiltInThemes.PureLight) {
+                com.example.feature.statistics.AboutScreen(onBack = {})
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("about_screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("myato_official_brand_lockup").assertIsDisplayed()
+        composeRule.onNodeWithText("MYATO").assertIsDisplayed()
+        composeRule.onNodeWithText("MUSIC").assertIsDisplayed()
+    }
 }
+
