@@ -187,29 +187,8 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun sortTracks(list: List<MusicTrack>, sortOrder: TrackSortOrder, query: String): List<MusicTrack> {
-        val filtered = if (query.isBlank()) list else {
-            val q = query.trim().lowercase()
-            list.filter {
-                it.title.lowercase().contains(q) ||
-                    it.artist.lowercase().contains(q) ||
-                    it.album.lowercase().contains(q) ||
-                    it.folderPath.lowercase().contains(q)
-            }
-        }
-        return when (sortOrder) {
-            TrackSortOrder.TITLE_ASC -> filtered.sortedBy { it.title.lowercase() }
-            TrackSortOrder.TITLE_DESC -> filtered.sortedByDescending { it.title.lowercase() }
-            TrackSortOrder.ARTIST_ASC -> filtered.sortedBy { it.artist.lowercase() }
-            TrackSortOrder.ALBUM_ASC -> filtered.sortedBy { it.album.lowercase() }
-            TrackSortOrder.DURATION_DESC -> filtered.sortedByDescending { it.durationMs }
-            TrackSortOrder.DATE_ADDED_DESC -> filtered.sortedByDescending { it.dateAddedSec }
-            TrackSortOrder.DATE_ADDED_ASC -> filtered.sortedBy { it.dateAddedSec }
-            TrackSortOrder.MOST_PLAYED -> filtered.sortedByDescending { it.playCount }
-            TrackSortOrder.LEAST_PLAYED -> filtered.sortedBy { it.playCount }
-            TrackSortOrder.RECENTLY_ADDED -> filtered.sortedByDescending { it.dateAddedSec }
-        }
-    }
+    fun sortTracks(list: List<MusicTrack>, sortOrder: TrackSortOrder, query: String): List<MusicTrack> =
+        filterAndSortTracks(list, sortOrder, query)
 
     // Playback & Multi-Queue
     fun playTracks(
@@ -640,6 +619,36 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
             "Atalho \"$label\" solicitado à tela inicial."
         } else {
             "Seu launcher não suporta fixação automática de atalhos."
+        }
+    }
+
+    companion object {
+        fun filterAndSortTracks(
+            list: List<MusicTrack>,
+            sortOrder: TrackSortOrder,
+            query: String,
+        ): List<MusicTrack> {
+            val filtered = if (query.isBlank()) list else {
+                val q = query.trim().lowercase()
+                list.filter {
+                    it.title.lowercase().contains(q) ||
+                        it.artist.lowercase().contains(q) ||
+                        it.album.lowercase().contains(q) ||
+                        it.folderPath.lowercase().contains(q)
+                }
+            }
+            return when (sortOrder) {
+                TrackSortOrder.TITLE_ASC -> filtered.sortedBy { it.title.lowercase() }
+                TrackSortOrder.TITLE_DESC -> filtered.sortedByDescending { it.title.lowercase() }
+                TrackSortOrder.ARTIST_ASC -> filtered.sortedBy { it.artist.lowercase() }
+                TrackSortOrder.ALBUM_ASC -> filtered.sortedBy { it.album.lowercase() }
+                TrackSortOrder.DURATION_DESC -> filtered.sortedByDescending { it.durationMs }
+                TrackSortOrder.DATE_ADDED_DESC -> filtered.sortedByDescending { it.dateAddedSec }
+                TrackSortOrder.DATE_ADDED_ASC -> filtered.sortedBy { it.dateAddedSec }
+                TrackSortOrder.MOST_PLAYED -> filtered.sortedByDescending { it.playCount }
+                TrackSortOrder.LEAST_PLAYED -> filtered.sortedBy { it.playCount }
+                TrackSortOrder.RECENTLY_ADDED -> filtered.sortedByDescending { it.dateAddedSec }
+            }
         }
     }
 }

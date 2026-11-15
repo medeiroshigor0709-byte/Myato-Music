@@ -7,7 +7,10 @@ import com.example.core.designsystem.BuiltInThemes
 import com.example.core.metadata.LrcLyricsEngine
 import com.example.core.metadata.TagEditPayload
 import com.example.domain.models.LyricLine
+import com.example.domain.models.MusicTrack
 import com.example.domain.models.SleepTimerMode
+import com.example.domain.models.TrackSortOrder
+import com.example.presentation.MyatoMainViewModel
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -127,5 +130,104 @@ class MyatoUnitTests {
         } finally {
             tmp.delete()
         }
+    }
+
+    @Test
+    fun `filterAndSortTracks handles all TrackSortOrder options and search query`() {
+        val sampleTracks = listOf(
+            MusicTrack(
+                id = 1L,
+                mediaStoreId = 1L,
+                title = "Beta Song",
+                artist = "Zed Artist",
+                album = "Mid Album",
+                albumId = 1L,
+                artistId = 1L,
+                durationMs = 120_000L,
+                sizeBytes = 1_000_000L,
+                filePath = "/music/rock/beta.mp3",
+                folderPath = "/music/rock",
+                contentUri = "content://1",
+                dateAddedSec = 200L,
+                playCount = 5,
+            ),
+            MusicTrack(
+                id = 2L,
+                mediaStoreId = 2L,
+                title = "Alpha Song",
+                artist = "Amber Artist",
+                album = "Zebra Album",
+                albumId = 2L,
+                artistId = 2L,
+                durationMs = 300_000L,
+                sizeBytes = 2_000_000L,
+                filePath = "/music/jazz/alpha.flac",
+                folderPath = "/music/jazz",
+                contentUri = "content://2",
+                dateAddedSec = 100L,
+                playCount = 1,
+            ),
+            MusicTrack(
+                id = 3L,
+                mediaStoreId = 3L,
+                title = "Gamma Song",
+                artist = "Mid Artist",
+                album = "Alpha Album",
+                albumId = 3L,
+                artistId = 3L,
+                durationMs = 200_000L,
+                sizeBytes = 3_000_000L,
+                filePath = "/music/pop/gamma.mp3",
+                folderPath = "/music/pop",
+                contentUri = "content://3",
+                dateAddedSec = 300L,
+                playCount = 10,
+            ),
+        )
+
+        assertEquals(
+            listOf(2L, 1L, 3L),
+            MyatoMainViewModel.filterAndSortTracks(sampleTracks, TrackSortOrder.TITLE_ASC, "").map { it.id },
+        )
+        assertEquals(
+            listOf(3L, 1L, 2L),
+            MyatoMainViewModel.filterAndSortTracks(sampleTracks, TrackSortOrder.TITLE_DESC, "").map { it.id },
+        )
+        assertEquals(
+            listOf(2L, 3L, 1L),
+            MyatoMainViewModel.filterAndSortTracks(sampleTracks, TrackSortOrder.ARTIST_ASC, "").map { it.id },
+        )
+        assertEquals(
+            listOf(3L, 1L, 2L),
+            MyatoMainViewModel.filterAndSortTracks(sampleTracks, TrackSortOrder.ALBUM_ASC, "").map { it.id },
+        )
+        assertEquals(
+            listOf(2L, 3L, 1L),
+            MyatoMainViewModel.filterAndSortTracks(sampleTracks, TrackSortOrder.DURATION_DESC, "").map { it.id },
+        )
+        assertEquals(
+            listOf(3L, 1L, 2L),
+            MyatoMainViewModel.filterAndSortTracks(sampleTracks, TrackSortOrder.DATE_ADDED_DESC, "").map { it.id },
+        )
+        assertEquals(
+            listOf(2L, 1L, 3L),
+            MyatoMainViewModel.filterAndSortTracks(sampleTracks, TrackSortOrder.DATE_ADDED_ASC, "").map { it.id },
+        )
+        assertEquals(
+            listOf(3L, 1L, 2L),
+            MyatoMainViewModel.filterAndSortTracks(sampleTracks, TrackSortOrder.MOST_PLAYED, "").map { it.id },
+        )
+        assertEquals(
+            listOf(2L, 1L, 3L),
+            MyatoMainViewModel.filterAndSortTracks(sampleTracks, TrackSortOrder.LEAST_PLAYED, "").map { it.id },
+        )
+        assertEquals(
+            listOf(3L, 1L, 2L),
+            MyatoMainViewModel.filterAndSortTracks(sampleTracks, TrackSortOrder.RECENTLY_ADDED, "").map { it.id },
+        )
+        assertEquals(
+            listOf(2L),
+            MyatoMainViewModel.filterAndSortTracks(sampleTracks, TrackSortOrder.TITLE_ASC, "jazz").map { it.id },
+        )
     }
 }
