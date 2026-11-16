@@ -118,6 +118,8 @@ import com.example.domain.models.Playlist
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Switch
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Official MYATO MUSIC brand emblem (delegates to MyatoOfficialSymbol for invariant brand identity).
@@ -442,10 +444,10 @@ fun MiniPlayerBar(
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     modifier: Modifier = Modifier,
+    progressPositionFlow: StateFlow<Long>? = null,
 ) {
     if (track == null) return
     val colors = LocalMyatoColors.current
-    val progress = if (durationMs > 0L) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
 
     Surface(
         modifier = modifier
@@ -515,16 +517,39 @@ fun MiniPlayerBar(
                     )
                 }
             }
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp),
-                color = colors.primary,
+            MiniPlayerProgressBar(
+                positionMs = positionMs,
+                durationMs = durationMs,
+                progressPositionFlow = progressPositionFlow,
+                primaryColor = colors.primary,
                 trackColor = colors.textSecondary.copy(alpha = 0.2f),
             )
         }
     }
+}
+
+@Composable
+private fun MiniPlayerProgressBar(
+    positionMs: Long,
+    durationMs: Long,
+    progressPositionFlow: StateFlow<Long>?,
+    primaryColor: Color,
+    trackColor: Color,
+) {
+    val livePosMs = if (progressPositionFlow != null) {
+        progressPositionFlow.collectAsStateWithLifecycle().value
+    } else {
+        positionMs
+    }
+    val progress = if (durationMs > 0L) (livePosMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+    LinearProgressIndicator(
+        progress = { progress },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(3.dp),
+        color = primaryColor,
+        trackColor = trackColor,
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

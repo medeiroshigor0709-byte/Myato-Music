@@ -124,6 +124,7 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val playbackState: StateFlow<PlaybackUiState> = playbackController.playbackState
+    val playbackProgressMs: StateFlow<Long> = playbackController.progressPositionMs
     val equalizerState = playbackController.equalizerEngine.state
     val equalizerPresets = playbackController.equalizerEngine.savedPresets
     val spectrumBars = playbackController.equalizerEngine.spectrumBars
@@ -153,7 +154,7 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
                 .map { list -> list.map { Triple(it.id, it.artist, it.title) } }
                 .distinctUntilChanged()
                 .collect { snapshot ->
-                    if (snapshot.isNotEmpty()) {
+                    if (snapshot.isNotEmpty() && !_isScanning.value) {
                         app.playlistRepository.syncAutoUpdateArtistPlaylists()
                     }
                 }
@@ -597,6 +598,7 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun setAppForeground(inForeground: Boolean) {
+        playbackController.setAppForeground(inForeground)
         playbackController.equalizerEngine.setVisualizerAppForeground(inForeground)
     }
 

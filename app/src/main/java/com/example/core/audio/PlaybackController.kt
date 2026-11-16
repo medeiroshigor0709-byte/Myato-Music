@@ -78,12 +78,31 @@ class PlaybackController(private val context: Context) {
     private var progressJob: Job? = null
     private var activeTrackStartMs: Long = 0L
     private var pendingAutoPlay: Boolean = false
+    @Volatile
+    private var isAppInForeground: Boolean = true
+    @Volatile
+    private var lastPersistedClockMs: Long = 0L
 
     private val _playbackState = MutableStateFlow(PlaybackUiState())
     val playbackState: StateFlow<PlaybackUiState> = _playbackState.asStateFlow()
 
+    private val _progressPositionMs = MutableStateFlow(0L)
+    val progressPositionMs: StateFlow<Long> = _progressPositionMs.asStateFlow()
+
     init {
         restoreLastActiveQueue()
+    }
+
+    fun setAppForeground(inForeground: Boolean) {
+        if (isAppInForeground == inForeground) return
+        isAppInForeground = inForeground
+        val controller = mediaController ?: return
+        if (controller.isPlaying) {
+            if (inForeground) {
+                _progressPositionMs.value = controller.currentPosition.coerceAtLeast(0L)
+            }
+            refreshProgressTicker(true)
+        }
     }
 
     fun connectToService() {
@@ -96,7 +115,7 @@ class PlaybackController(private val context: Context) {
             mediaController = controller
             attachPlayerListener(controller)
             syncVolumeFromDevice()
-            startProgressTicker()
+            refreshProgressTicker(controller.isPlaying)
             // Load existing queue into ExoPlayer if player has no items yet
             val state = _playbackState.value
             if (controller.mediaItemCount == 0 && state.queueTracks.isNotEmpty()) {
@@ -119,7 +138,13 @@ class PlaybackController(private val context: Context) {
     private fun attachPlayerListener(controller: MediaController) {
         controller.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                _playbackState.value = _playbackState.value.copy(isPlaying = isPlaying)
+                val pos = controller.currentPosition.coerceAtLeast(0L)
+                _progressPositionMs.value = pos
+                _playbackState.value = _playbackState.value.copy(
+                    isPlaying = isPlaying,
+                    positionMs = pos,
+                )
+                refreshProgressTicker(isPlaying)
                 persistCurrentQueuePosition()
                 pushWidgetUpdate()
             }
@@ -136,6 +161,7 @@ class PlaybackController(private val context: Context) {
                 activeTrackStartMs = System.currentTimeMillis()
                 val idx = controller.currentMediaItemIndex
                 val track = _playbackState.value.queueTracks.getOrNull(idx)
+                _progressPositionMs.value = 0L
                 _playbackState.value = _playbackState.value.copy(
                     currentIndex = idx,
                     currentTrack = track,
@@ -148,6 +174,7 @@ class PlaybackController(private val context: Context) {
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                refreshProgressTicker(false)
                 _playbackState.value = _playbackState.value.copy(
                     isPlaying = false,
                     errorMessage = "Não foi possível reproduzir este arquivo (${error.errorCodeName}). Verifique se o arquivo existe ou se o formato é suportado.",
@@ -217,6 +244,7 @@ class PlaybackController(private val context: Context) {
 
             launch(Dispatchers.Main) {
                 activeTrackStartMs = System.currentTimeMillis()
+                _progressPositionMs.value = 0L
                 _playbackState.value = _playbackState.value.copy(
                     activeQueue = updatedQueue,
                     queueTracks = playable,
@@ -266,6 +294,7 @@ class PlaybackController(private val context: Context) {
 
         scope.launch(Dispatchers.Main) {
             activeTrackStartMs = System.currentTimeMillis()
+            _progressPositionMs.value = queue.currentPositionMs
             _playbackState.value = _playbackState.value.copy(
                 activeQueue = domainQueue,
                 queueTracks = orderedTracks,
@@ -364,6 +393,7 @@ class PlaybackController(private val context: Context) {
     fun seekTo(positionMs: Long) {
         val safe = positionMs.coerceAtLeast(0L)
         mediaController?.seekTo(safe)
+        _progressPositionMs.value = safe
         _playbackState.value = _playbackState.value.copy(positionMs = safe)
         persistCurrentQueuePosition()
     }
@@ -447,6 +477,8 @@ class PlaybackController(private val context: Context) {
             database.queueDao().clearQueueTracks(qid)
             launch(Dispatchers.Main) {
                 mediaController?.clearMediaItems()
+                refreshProgressTicker(false)
+                _progressPositionMs.value = 0L
                 _playbackState.value = _playbackState.value.copy(
                     queueTracks = emptyList(),
                     currentIndex = -1,
@@ -464,6 +496,7 @@ class PlaybackController(private val context: Context) {
         val list = _playbackState.value.queueTracks
         if (index in list.indices) {
             val track = list[index]
+            _progressPositionMs.value = 0L
             _playbackState.value = _playbackState.value.copy(
                 currentIndex = index,
                 currentTrack = track,
@@ -585,7 +618,7 @@ class PlaybackController(private val context: Context) {
         val state = _playbackState.value
         val qid = state.activeQueue?.id ?: return
         val trackId = state.currentTrack?.id
-        val pos = state.positionMs
+        val pos = _progressPositionMs.value.takeIf { it > 0L } ?: state.positionMs
         val existing = database.queueDao().getQueueById(qid)
         if (existing != null) {
             database.queueDao().updateQueue(
@@ -612,23 +645,34 @@ class PlaybackController(private val context: Context) {
         }
     }
 
-    private fun startProgressTicker() {
+    private fun refreshProgressTicker(isPlaying: Boolean) {
         progressJob?.cancel()
+        if (!isPlaying) {
+            progressJob = null
+            return
+        }
+        val intervalMs = if (isAppInForeground) 500L else 5000L
         progressJob = scope.launch {
             while (true) {
-                delay(500L)
-                val controller = mediaController
-                if (controller != null && controller.isPlaying) {
-                    val pos = controller.currentPosition.coerceAtLeast(0L)
-                    val dur = controller.duration.takeIf { it > 0L } ?: _playbackState.value.durationMs
+                delay(intervalMs)
+                val controller = mediaController ?: break
+                if (!controller.isPlaying) break
+                val pos = controller.currentPosition.coerceAtLeast(0L)
+                _progressPositionMs.value = pos
+
+                val dur = controller.duration.takeIf { it > 0L } ?: _playbackState.value.durationMs
+                if (dur != _playbackState.value.durationMs) {
                     _playbackState.value = _playbackState.value.copy(
-                        positionMs = pos,
                         durationMs = dur,
+                        positionMs = pos,
                     )
-                    if (pos % 5000L < 600L) {
-                        persistCurrentQueuePosition()
-                        pushWidgetUpdate()
-                    }
+                }
+
+                val nowMs = android.os.SystemClock.elapsedRealtime()
+                if (nowMs - lastPersistedClockMs >= 5000L) {
+                    lastPersistedClockMs = nowMs
+                    persistCurrentQueuePosition()
+                    pushWidgetUpdate()
                 }
             }
         }
@@ -636,15 +680,25 @@ class PlaybackController(private val context: Context) {
 
     fun pushWidgetUpdate() {
         val s = _playbackState.value
-        WidgetUpdateHelper.updateAllWidgets(
-            context = context,
-            title = s.currentTrack?.title ?: "MYATO MUSIC",
-            artist = s.currentTrack?.artist ?: "Sua música. Seu estilo.",
-            album = s.currentTrack?.album ?: "Offline Audio Engine",
-            artUri = s.currentTrack?.albumArtUri,
-            isPlaying = s.isPlaying,
-            isFavorite = s.currentTrack?.isFavorite ?: false,
-            progressPercent = if (s.durationMs > 0L) ((s.positionMs * 100L) / s.durationMs).toInt().coerceIn(0, 100) else 0,
-        )
+        val pos = _progressPositionMs.value.takeIf { it > 0L } ?: s.positionMs
+        val title = s.currentTrack?.title ?: "MYATO MUSIC"
+        val artist = s.currentTrack?.artist ?: "Sua música. Seu estilo."
+        val album = s.currentTrack?.album ?: "Offline Audio Engine"
+        val artUri = s.currentTrack?.albumArtUri
+        val isPlaying = s.isPlaying
+        val isFavorite = s.currentTrack?.isFavorite ?: false
+        val progressPercent = if (s.durationMs > 0L) ((pos * 100L) / s.durationMs).toInt().coerceIn(0, 100) else 0
+        scope.launch(Dispatchers.IO) {
+            WidgetUpdateHelper.updateAllWidgets(
+                context = context,
+                title = title,
+                artist = artist,
+                album = album,
+                artUri = artUri,
+                isPlaying = isPlaying,
+                isFavorite = isFavorite,
+                progressPercent = progressPercent,
+            )
+        }
     }
 }

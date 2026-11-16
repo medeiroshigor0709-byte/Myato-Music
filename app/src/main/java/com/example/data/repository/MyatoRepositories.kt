@@ -36,6 +36,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -94,6 +96,7 @@ class PlaylistRepository(
     private val context: Context,
     private val database: MyatoDatabase,
 ) {
+    private val autoSyncMutex = Mutex()
     val playlistsFlow: Flow<List<Playlist>> = combine(
         database.playlistDao().observePlaylists(),
         database.playlistDao().observeAllPlaylistEntries(),
@@ -219,17 +222,17 @@ class PlaylistRepository(
         }.getOrNull()
     }
 
-    suspend fun syncAutoUpdateArtistPlaylists(): Int {
+    suspend fun syncAutoUpdateArtistPlaylists(): Int = autoSyncMutex.withLock {
         val playlists = database.playlistDao().getPlaylistsSync()
             .filter { it.autoUpdateByArtist && !it.artistFilterName.isNullOrBlank() }
-        if (playlists.isEmpty()) return 0
+        if (playlists.isEmpty()) return@withLock 0
 
         val allTracks = database.trackDao().getAllTracksSync().map { it.toDomain() }
         var totalAdded = 0
         playlists.forEach { pl ->
             totalAdded += syncPlaylistForArtistEntity(pl, allTracks)
         }
-        return totalAdded
+        totalAdded
     }
 
     private suspend fun syncPlaylistForArtistEntity(

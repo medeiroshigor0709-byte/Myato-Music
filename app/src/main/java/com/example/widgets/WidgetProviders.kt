@@ -88,6 +88,8 @@ class WidgetActionReceiver : BroadcastReceiver() {
 
 object WidgetUpdateHelper {
 
+    private val coverCache = android.util.LruCache<String, android.graphics.Bitmap>(2)
+
     fun updateAllWidgets(
         context: Context,
         title: String,
@@ -100,16 +102,19 @@ object WidgetUpdateHelper {
     ) {
         val manager = AppWidgetManager.getInstance(context)
         val smallIds = manager.getAppWidgetIds(ComponentName(context, SmallPlayerWidgetProvider::class.java))
-        if (smallIds.isNotEmpty()) {
-            updateSmallWidgets(context, manager, smallIds, title, artUri, isPlaying)
-        }
         val mediumIds = manager.getAppWidgetIds(ComponentName(context, MediumPlayerWidgetProvider::class.java))
-        if (mediumIds.isNotEmpty()) {
-            updateMediumWidgets(context, manager, mediumIds, title, artist, artUri, isPlaying)
-        }
         val largeIds = manager.getAppWidgetIds(ComponentName(context, LargePlayerWidgetProvider::class.java))
+        if (smallIds.isEmpty() && mediumIds.isEmpty() && largeIds.isEmpty()) return
+
+        val sharedBitmap = resolveCoverBitmap(context, artUri)
+        if (smallIds.isNotEmpty()) {
+            updateSmallWidgets(context, manager, smallIds, title, artUri, isPlaying, sharedBitmap)
+        }
+        if (mediumIds.isNotEmpty()) {
+            updateMediumWidgets(context, manager, mediumIds, title, artist, artUri, isPlaying, sharedBitmap)
+        }
         if (largeIds.isNotEmpty()) {
-            updateLargeWidgets(context, manager, largeIds, title, artist, album, artUri, isPlaying, isFavorite, progressPercent)
+            updateLargeWidgets(context, manager, largeIds, title, artist, album, artUri, isPlaying, isFavorite, progressPercent, sharedBitmap)
         }
     }
 
@@ -120,6 +125,7 @@ object WidgetUpdateHelper {
         title: String,
         artUri: String?,
         isPlaying: Boolean,
+        preloadedCover: android.graphics.Bitmap? = null,
     ) {
         val views = RemoteViews(context.packageName, R.layout.widget_small)
         views.setTextViewText(R.id.widget_title, title)
@@ -127,7 +133,7 @@ object WidgetUpdateHelper {
             R.id.widget_btn_play_pause,
             if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
         )
-        bindCover(context, views, artUri)
+        bindCover(context, views, artUri, preloadedCover)
         views.setOnClickPendingIntent(R.id.widget_root_small, openAppIntent(context))
         views.setOnClickPendingIntent(R.id.widget_btn_play_pause, actionIntent(context, WidgetActionReceiver.ACTION_PLAY_PAUSE, 1))
         manager.updateAppWidget(ids, views)
@@ -141,6 +147,7 @@ object WidgetUpdateHelper {
         artist: String,
         artUri: String?,
         isPlaying: Boolean,
+        preloadedCover: android.graphics.Bitmap? = null,
     ) {
         val views = RemoteViews(context.packageName, R.layout.widget_medium)
         views.setTextViewText(R.id.widget_title, title)
@@ -149,7 +156,7 @@ object WidgetUpdateHelper {
             R.id.widget_btn_play_pause,
             if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
         )
-        bindCover(context, views, artUri)
+        bindCover(context, views, artUri, preloadedCover)
         views.setOnClickPendingIntent(R.id.widget_root_medium, openAppIntent(context))
         views.setOnClickPendingIntent(R.id.widget_btn_prev, actionIntent(context, WidgetActionReceiver.ACTION_PREV, 2))
         views.setOnClickPendingIntent(R.id.widget_btn_play_pause, actionIntent(context, WidgetActionReceiver.ACTION_PLAY_PAUSE, 3))
@@ -168,6 +175,7 @@ object WidgetUpdateHelper {
         isPlaying: Boolean,
         isFavorite: Boolean,
         progressPercent: Int,
+        preloadedCover: android.graphics.Bitmap? = null,
     ) {
         val views = RemoteViews(context.packageName, R.layout.widget_large)
         views.setTextViewText(R.id.widget_title, title)
@@ -182,7 +190,7 @@ object WidgetUpdateHelper {
             R.id.widget_btn_favorite,
             if (isFavorite) android.R.drawable.btn_star_big_on else android.R.drawable.btn_star_big_off,
         )
-        bindCover(context, views, artUri)
+        bindCover(context, views, artUri, preloadedCover)
         views.setOnClickPendingIntent(R.id.widget_root_large, openAppIntent(context))
         views.setOnClickPendingIntent(R.id.widget_btn_prev, actionIntent(context, WidgetActionReceiver.ACTION_PREV, 5))
         views.setOnClickPendingIntent(R.id.widget_btn_play_pause, actionIntent(context, WidgetActionReceiver.ACTION_PLAY_PAUSE, 6))
@@ -213,17 +221,49 @@ object WidgetUpdateHelper {
         return ShortcutManagerCompat.requestPinShortcut(context, shortcut, null)
     }
 
-    private fun bindCover(context: Context, views: RemoteViews, artUri: String?) {
+    private fun resolveCoverBitmap(context: Context, artUri: String?): android.graphics.Bitmap? {
+        if (artUri.isNullOrBlank()) return null
+        coverCache.get(artUri)?.takeIf { !it.isRecycled }?.let { return it }
+        val decoded = runCatching {
+            val uri = Uri.parse(artUri)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, bounds)
+            }
+            var sampleSize = 1
+            val targetMax = 192
+            if (bounds.outWidth > targetMax || bounds.outHeight > targetMax) {
+                var halfW = bounds.outWidth / 2
+                var halfH = bounds.outHeight / 2
+                while ((halfW / sampleSize) >= targetMax && (halfH / sampleSize) >= targetMax) {
+                    sampleSize *= 2
+                }
+            }
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize.coerceAtLeast(1)
+                inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+            }
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, opts)
+            }
+        }.getOrNull()
+        if (decoded != null) {
+            coverCache.put(artUri, decoded)
+        }
+        return decoded
+    }
+
+    private fun bindCover(
+        context: Context,
+        views: RemoteViews,
+        artUri: String?,
+        preloadedCover: android.graphics.Bitmap? = null,
+    ) {
         if (artUri.isNullOrBlank()) {
             views.setImageViewResource(R.id.widget_cover, R.drawable.img_default_album_art)
             return
         }
-        val bmp = runCatching {
-            context.contentResolver.openInputStream(Uri.parse(artUri))?.use { stream ->
-                val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
-                BitmapFactory.decodeStream(stream, null, opts)
-            }
-        }.getOrNull()
+        val bmp = preloadedCover ?: resolveCoverBitmap(context, artUri)
         if (bmp != null) {
             views.setImageViewBitmap(R.id.widget_cover, bmp)
         } else {

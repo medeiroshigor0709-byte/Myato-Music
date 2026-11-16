@@ -155,7 +155,7 @@ class EqualizerEngine(
                     object : Visualizer.OnDataCaptureListener {
                         override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
                         override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, samplingRate: Int) {
-                            if (fft == null || fft.size < 4 || !isForegroundActive) return
+                            if (fft == null || fft.size < 4 || !isForegroundActive || !isVisualizerUserEnabled) return
                             val step = ((fft.size / 2) / 16).coerceAtLeast(1)
                             var hasSignal = false
                             for (i in 0 until 16) {
@@ -166,6 +166,7 @@ class EqualizerEngine(
                                 if (mag > 0.04f) hasSignal = true
                                 reusableFftMagnitudes[i] = mag.coerceAtLeast(0.04f)
                             }
+                            if (!hasSignal && !_hasRealFftSignal.value) return
                             _hasRealFftSignal.value = hasSignal
                             _spectrumBars.value = reusableFftMagnitudes.toList()
                         }

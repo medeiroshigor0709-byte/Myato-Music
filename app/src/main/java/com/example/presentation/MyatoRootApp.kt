@@ -43,11 +43,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
@@ -121,39 +121,39 @@ fun MyatoRootApp(
     openPlayerOnStart: Boolean = false,
     openPlaylistPickerOnStart: Boolean = false,
 ) {
-    val activeTheme by viewModel.activeTheme.collectAsState()
-    val allThemes by viewModel.allThemes.collectAsState()
-    val preferences by viewModel.preferences.collectAsState()
-    val tracks by viewModel.tracks.collectAsState()
-    val albums by viewModel.albums.collectAsState()
-    val artists by viewModel.artists.collectAsState()
-    val folders by viewModel.folders.collectAsState()
-    val genres by viewModel.genres.collectAsState()
-    val favorites by viewModel.favoriteTracks.collectAsState()
-    val recentTracks by viewModel.recentlyAddedTracks.collectAsState()
-    val mostPlayed by viewModel.mostPlayedTracks.collectAsState()
-    val playlists by viewModel.playlists.collectAsState()
-    val queues by viewModel.queues.collectAsState()
-    val playbackState by viewModel.playbackState.collectAsState()
-    val eqState by viewModel.equalizerState.collectAsState()
-    val eqPresets by viewModel.equalizerPresets.collectAsState()
-    val spectrumBars by viewModel.spectrumBars.collectAsState()
-    val hasRealFftSignal by viewModel.hasRealFftSignal.collectAsState()
-    val sleepTimerState by viewModel.sleepTimerState.collectAsState()
-    val statsSummary by viewModel.statsSummary.collectAsState()
-    val backupHistory by viewModel.backupHistory.collectAsState()
-    val previewedBackup by viewModel.previewedBackup.collectAsState()
-    val duplicates by viewModel.duplicates.collectAsState()
-    val isScanning by viewModel.isScanning.collectAsState()
-    val statusMessage by viewModel.statusMessage.collectAsState()
+    val activeTheme by viewModel.activeTheme.collectAsStateWithLifecycle()
+    val allThemes by viewModel.allThemes.collectAsStateWithLifecycle()
+    val preferences by viewModel.preferences.collectAsStateWithLifecycle()
+    val tracks by viewModel.tracks.collectAsStateWithLifecycle()
+    val albums by viewModel.albums.collectAsStateWithLifecycle()
+    val artists by viewModel.artists.collectAsStateWithLifecycle()
+    val folders by viewModel.folders.collectAsStateWithLifecycle()
+    val genres by viewModel.genres.collectAsStateWithLifecycle()
+    val favorites by viewModel.favoriteTracks.collectAsStateWithLifecycle()
+    val recentTracks by viewModel.recentlyAddedTracks.collectAsStateWithLifecycle()
+    val mostPlayed by viewModel.mostPlayedTracks.collectAsStateWithLifecycle()
+    val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val queues by viewModel.queues.collectAsStateWithLifecycle()
+    val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+    val eqState by viewModel.equalizerState.collectAsStateWithLifecycle()
+    val eqPresets by viewModel.equalizerPresets.collectAsStateWithLifecycle()
+    val spectrumBars by viewModel.spectrumBars.collectAsStateWithLifecycle()
+    val hasRealFftSignal by viewModel.hasRealFftSignal.collectAsStateWithLifecycle()
+    val sleepTimerState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
+    val statsSummary by viewModel.statsSummary.collectAsStateWithLifecycle()
+    val backupHistory by viewModel.backupHistory.collectAsStateWithLifecycle()
+    val previewedBackup by viewModel.previewedBackup.collectAsStateWithLifecycle()
+    val duplicates by viewModel.duplicates.collectAsStateWithLifecycle()
+    val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
+    val statusMessage by viewModel.statusMessage.collectAsStateWithLifecycle()
 
     val currentTrackId = playbackState.currentTrack?.id ?: -1L
     val currentBookmarks by remember(currentTrackId) {
         if (currentTrackId != -1L) viewModel.observeBookmarks(currentTrackId) else flowOf(emptyList())
-    }.collectAsState(initial = emptyList())
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
     val currentNote by remember(currentTrackId) {
         if (currentTrackId != -1L) viewModel.observeNote(currentTrackId) else flowOf(null)
-    }.collectAsState(initial = null)
+    }.collectAsStateWithLifecycle(initialValue = null)
 
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -296,6 +296,7 @@ fun MyatoRootApp(
                                     onOpenPlayer = { navController.navigate(MyatoRoute.FullPlayer) },
                                     onPlayPause = { viewModel.playbackController.togglePlayPause() },
                                     onNext = { viewModel.playbackController.skipNext() },
+                                    progressPositionFlow = viewModel.playbackProgressMs,
                                 )
                                 if (!useRail) {
                                     NavigationBar(
@@ -706,6 +707,7 @@ fun MyatoRootApp(
                                     onSetAnimationsDisabled = { viewModel.setAnimationsDisabled(it) },
                                     onSetReduceMotion = { viewModel.setReduceMotion(it) },
                                     onSetReduceEffectsOnLowBattery = { viewModel.setReduceEffectsOnLowBattery(it) },
+                                    progressPositionFlow = viewModel.playbackProgressMs,
                                 )
                             }
 
@@ -719,6 +721,7 @@ fun MyatoRootApp(
                                     onSeekTo = { viewModel.playbackController.seekTo(it) },
                                     loadLyrics = { t -> viewModel.loadTrackLyrics(t) },
                                     onSaveLyrics = { t, content -> viewModel.saveTrackLyrics(t, content) },
+                                    progressPositionFlow = viewModel.playbackProgressMs,
                                 )
                             }
 

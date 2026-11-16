@@ -105,9 +105,11 @@ import com.example.domain.models.Bookmark
 import com.example.domain.models.ListeningStatsSummary
 import com.example.domain.models.MusicNote
 import com.example.domain.models.MusicTrack
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.models.PlayerAppearance
 import com.example.domain.models.PlayerVisualBackgroundStyle
 import com.example.domain.models.RepeatMode as MyatoRepeatMode
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * 13. Full Player Screen — Cinematic artwork, dynamic ambient backdrop, interactive progress,
@@ -177,21 +179,17 @@ fun FullPlayerScreen(
     onSetAnimationsDisabled: (Boolean) -> Unit = {},
     onSetReduceMotion: (Boolean) -> Unit = {},
     onSetReduceEffectsOnLowBattery: (Boolean) -> Unit = {},
+    progressPositionFlow: StateFlow<Long>? = null,
 ) {
     val colors = LocalMyatoColors.current
     val motion = LocalMotionSettings.current
     val scrollState = rememberScrollState()
     val track = playbackState.currentTrack
-    var isSeeking by remember { mutableStateOf(false) }
-    var sliderDragPos by remember { mutableFloatStateOf(0f) }
     var showBookmarksSheet by remember { mutableStateOf(false) }
     var showNoteSheet by remember { mutableStateOf(false) }
     var showPlayerSettingsSheet by remember { mutableStateOf(false) }
 
     val duration = playbackState.durationMs.coerceAtLeast(1L)
-    val effectiveProgress = if (isSeeking) sliderDragPos else {
-        (playbackState.positionMs.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
-    }
 
     val coverScale by animateFloatAsState(
         targetValue = if (!motion.isAnimationsActive || motion.isReducedMotionActive) 1f else if (playbackState.isPlaying) 1f else 0.94f,
@@ -346,60 +344,17 @@ fun FullPlayerScreen(
 
             Spacer(Modifier.height(10.dp))
 
-            // Interactive Progress Bar
-            Slider(
-                value = effectiveProgress,
-                onValueChange = {
-                    isSeeking = true
-                    sliderDragPos = it
-                },
-                onValueChangeFinished = {
-                    val targetMs = (sliderDragPos * duration).toLong()
-                    isSeeking = false
-                    onSeekTo(targetMs)
-                },
-                colors = SliderDefaults.colors(
-                    thumbColor = colors.primary,
-                    activeTrackColor = colors.primary,
-                    inactiveTrackColor = colors.textSecondary.copy(alpha = 0.25f),
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("player_progress_slider"),
+            // Interactive Progress Bar (isolated recomposition scope for 500ms ticks)
+            FullPlayerProgressSection(
+                fallbackPositionMs = playbackState.positionMs,
+                durationMs = duration,
+                rawDurationMs = playbackState.durationMs,
+                formatExtension = track?.formatExtension ?: "--",
+                progressPositionFlow = progressPositionFlow,
+                onSeekTo = onSeekTo,
+                onSeekBack10s = onSeekBack10s,
+                onSeekForward10s = onSeekForward10s,
             )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = TimeFormatter.formatDuration(if (isSeeking) (sliderDragPos * duration).toLong() else playbackState.positionMs),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.textSecondary,
-                    )
-                    IconButton(onClick = onSeekBack10s, modifier = Modifier.minimumInteractiveComponentSize()) {
-                        Icon(Icons.Rounded.Replay10, contentDescription = "Retroceder 10s", tint = colors.textSecondary, modifier = Modifier.size(20.dp))
-                    }
-                }
-                Text(
-                    text = track?.formatExtension ?: "--",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.primary,
-                    fontWeight = FontWeight.Bold,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onSeekForward10s, modifier = Modifier.minimumInteractiveComponentSize()) {
-                        Icon(Icons.Rounded.Forward10, contentDescription = "Avançar 10s", tint = colors.textSecondary, modifier = Modifier.size(20.dp))
-                    }
-                    Text(
-                        text = TimeFormatter.formatDuration(playbackState.durationMs),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.textSecondary,
-                    )
-                }
-            }
 
             Spacer(Modifier.height(10.dp))
 
@@ -519,9 +474,10 @@ fun FullPlayerScreen(
             Spacer(Modifier.height(10.dp))
 
             // 3. LETRAS DA MÚSICA (Prévia sincronizada com verso atual em destaque)
-            LyricsPreviewSection(
+            FullPlayerLyricsSection(
                 track = track,
-                positionMs = playbackState.positionMs,
+                fallbackPositionMs = playbackState.positionMs,
+                progressPositionFlow = progressPositionFlow,
                 onOpenFullLyrics = onOpenLyrics,
                 onSeekTo = onSeekTo,
             )
@@ -552,6 +508,11 @@ fun FullPlayerScreen(
 
     if (showBookmarksSheet && track != null) {
         var newLabel by remember { mutableStateOf("") }
+        val livePositionMs = if (progressPositionFlow != null) {
+            progressPositionFlow.collectAsStateWithLifecycle().value
+        } else {
+            playbackState.positionMs
+        }
         ModalBottomSheet(onDismissRequest = { showBookmarksSheet = false }, containerColor = colors.card) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Marcadores de ${track.title}", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
@@ -560,14 +521,14 @@ fun FullPlayerScreen(
                     OutlinedTextField(
                         value = newLabel,
                         onValueChange = { newLabel = it },
-                        label = { Text("Nome do marcador (${TimeFormatter.formatDuration(playbackState.positionMs)})") },
+                        label = { Text("Nome do marcador (${TimeFormatter.formatDuration(livePositionMs)})") },
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            onAddBookmark(track.id, newLabel.ifBlank { "Ponto ${bookmarks.size + 1}" }, playbackState.positionMs)
+                            onAddBookmark(track.id, newLabel.ifBlank { "Ponto ${bookmarks.size + 1}" }, livePositionMs)
                             newLabel = ""
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
@@ -683,4 +644,103 @@ private fun PlayerActionPill(
         Spacer(Modifier.height(4.dp))
         Text(label, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, maxLines = 1)
     }
+}
+
+@Composable
+private fun FullPlayerProgressSection(
+    fallbackPositionMs: Long,
+    durationMs: Long,
+    rawDurationMs: Long,
+    formatExtension: String,
+    progressPositionFlow: StateFlow<Long>?,
+    onSeekTo: (Long) -> Unit,
+    onSeekBack10s: () -> Unit,
+    onSeekForward10s: () -> Unit,
+) {
+    val colors = LocalMyatoColors.current
+    var isSeeking by remember { mutableStateOf(false) }
+    var sliderDragPos by remember { mutableFloatStateOf(0f) }
+    val livePositionMs = if (progressPositionFlow != null) {
+        progressPositionFlow.collectAsStateWithLifecycle().value
+    } else {
+        fallbackPositionMs
+    }
+    val effectiveProgress = if (isSeeking) sliderDragPos else {
+        (livePositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+    }
+
+    Slider(
+        value = effectiveProgress,
+        onValueChange = {
+            isSeeking = true
+            sliderDragPos = it
+        },
+        onValueChangeFinished = {
+            val targetMs = (sliderDragPos * durationMs).toLong()
+            isSeeking = false
+            onSeekTo(targetMs)
+        },
+        colors = SliderDefaults.colors(
+            thumbColor = colors.primary,
+            activeTrackColor = colors.primary,
+            inactiveTrackColor = colors.textSecondary.copy(alpha = 0.25f),
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("player_progress_slider"),
+    )
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = TimeFormatter.formatDuration(if (isSeeking) (sliderDragPos * durationMs).toLong() else livePositionMs),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary,
+            )
+            IconButton(onClick = onSeekBack10s, modifier = Modifier.minimumInteractiveComponentSize()) {
+                Icon(Icons.Rounded.Replay10, contentDescription = "Retroceder 10s", tint = colors.textSecondary, modifier = Modifier.size(20.dp))
+            }
+        }
+        Text(
+            text = formatExtension,
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.primary,
+            fontWeight = FontWeight.Bold,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onSeekForward10s, modifier = Modifier.minimumInteractiveComponentSize()) {
+                Icon(Icons.Rounded.Forward10, contentDescription = "Avançar 10s", tint = colors.textSecondary, modifier = Modifier.size(20.dp))
+            }
+            Text(
+                text = TimeFormatter.formatDuration(rawDurationMs),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FullPlayerLyricsSection(
+    track: MusicTrack?,
+    fallbackPositionMs: Long,
+    progressPositionFlow: StateFlow<Long>?,
+    onOpenFullLyrics: (Long) -> Unit,
+    onSeekTo: (Long) -> Unit,
+) {
+    val livePositionMs = if (progressPositionFlow != null) {
+        progressPositionFlow.collectAsStateWithLifecycle().value
+    } else {
+        fallbackPositionMs
+    }
+    LyricsPreviewSection(
+        track = track,
+        positionMs = livePositionMs,
+        onOpenFullLyrics = onOpenFullLyrics,
+        onSeekTo = onSeekTo,
+    )
 }

@@ -39,6 +39,12 @@ class MediaStoreScanner(
     suspend fun scanDeviceLibrary(monitoredFolders: Set<String> = emptySet()): LibraryScanResult =
         withContext(Dispatchers.IO) {
             val capabilities = AudioFormatSupport.detectDeviceCapabilities()
+            val playableExtensions = capabilities
+                .asSequence()
+                .filter { it.isSupportedOnDevice }
+                .map { it.extension.uppercase() }
+                .toSet()
+            val albumArtBaseUri = Uri.parse("content://media/external/audio/albumart")
             val tracks = mutableListOf<MusicTrackEntity>()
             val existingById = database.trackDao().getAllTracksSync().associateBy { it.id }
 
@@ -104,14 +110,14 @@ class MediaStoreScanner(
                     while (cursor.moveToNext()) {
                         val id = cursor.getLong(idCol)
                         val filePath = cursor.getString(dataCol).orEmpty()
-                        val folderPath = File(filePath).parent ?: ""
+                        val folderPath = filePath.substringBeforeLast('/', "")
 
                         if (monitoredFolders.isNotEmpty() && monitoredFolders.none { folderPath.startsWith(it) }) {
                             continue
                         }
 
                         val title = cursor.getString(titleCol)?.takeIf { it.isNotBlank() }
-                            ?: File(filePath).nameWithoutExtension
+                            ?: filePath.substringAfterLast('/').substringBeforeLast('.').ifBlank { null }
                             ?: "Faixa desconhecida"
                         val artist = MusicSearchEngine.sanitizeArtistName(cursor.getString(artistCol))
                         val artistId = cursor.getLong(artistIdCol)
@@ -122,12 +128,9 @@ class MediaStoreScanner(
                         val sizeBytes = cursor.getLong(sizeCol).coerceAtLeast(0L)
                         val mimeType = cursor.getString(mimeCol) ?: "audio/mpeg"
                         val ext = AudioFormatSupport.inferExtension(filePath, mimeType)
-                        val playable = isFormatPlayable(ext, capabilities)
+                        val playable = ext.uppercase() in playableExtensions
                         val contentUri = ContentUris.withAppendedId(collection, id).toString()
-                        val artUri = ContentUris.withAppendedId(
-                            Uri.parse("content://media/external/audio/albumart"),
-                            albumId
-                        ).toString()
+                        val artUri = ContentUris.withAppendedId(albumArtBaseUri, albumId).toString()
 
                         val prev = existingById[id]
                         val trackNumRaw = cursor.getInt(trackCol)

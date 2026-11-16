@@ -72,7 +72,9 @@ import com.example.core.metadata.LrcLyricsEngine
 import com.example.core.metadata.TagEditPayload
 import com.example.domain.models.LyricLine
 import com.example.domain.models.MusicTrack
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.feature.library.SimpleHeader
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * 14. Offline Lyrics & LRC Sync/Editor Screen
@@ -85,8 +87,14 @@ fun LyricsScreen(
     onSeekTo: (Long) -> Unit,
     loadLyrics: suspend (MusicTrack) -> String,
     onSaveLyrics: (MusicTrack, String) -> Unit,
+    progressPositionFlow: StateFlow<Long>? = null,
 ) {
     val colors = LocalMyatoColors.current
+    val livePositionMs = if (progressPositionFlow != null) {
+        progressPositionFlow.collectAsStateWithLifecycle().value
+    } else {
+        currentPositionMs
+    }
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = Visualizar, 1 = Editar / Sincronizar LRC
     var rawText by remember { mutableStateOf("") }
     val parsedLines = remember(rawText) { LrcLyricsEngine.parseLyrics(rawText) }
@@ -103,8 +111,8 @@ fun LyricsScreen(
         }
     }
 
-    val activeIdx = remember(parsedLines, currentPositionMs) {
-        LrcLyricsEngine.findActiveLineIndex(parsedLines, currentPositionMs)
+    val activeIdx = remember(parsedLines, livePositionMs) {
+        LrcLyricsEngine.findActiveLineIndex(parsedLines, livePositionMs)
     }
 
     LaunchedEffect(activeIdx) {
@@ -173,7 +181,7 @@ fun LyricsScreen(
                             Icon(Icons.Rounded.SkipPrevious, contentDescription = null, tint = colors.primary)
                             Text("Linha anterior", color = colors.textPrimary)
                         }
-                        Text(TimeFormatter.formatDuration(currentPositionMs), style = MaterialTheme.typography.labelMedium, color = colors.primary)
+                        Text(TimeFormatter.formatDuration(livePositionMs), style = MaterialTheme.typography.labelMedium, color = colors.primary)
                         OutlinedButton(onClick = {
                             val next = parsedLines.drop((activeIdx + 1).coerceAtLeast(0)).firstOrNull { it.timestampMs != null }
                             next?.timestampMs?.let(onSeekTo)
@@ -239,7 +247,7 @@ fun LyricsScreen(
                         onClick = {
                             val lines = LrcLyricsEngine.parseLyrics(rawText).toMutableList()
                             if (syncCursor in lines.indices) {
-                                lines[syncCursor] = lines[syncCursor].copy(timestampMs = currentPositionMs)
+                                lines[syncCursor] = lines[syncCursor].copy(timestampMs = livePositionMs)
                                 rawText = LrcLyricsEngine.serializeToLrc(lines, track.title, track.artist)
                                 syncCursor = (syncCursor + 1).coerceAtMost(lines.lastIndex)
                             }
