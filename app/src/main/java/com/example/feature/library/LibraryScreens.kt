@@ -1,5 +1,6 @@
 package com.example.feature.library
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
@@ -42,16 +43,18 @@ import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteForever
-import androidx.compose.material.icons.rounded.Deselect
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shuffle
@@ -69,6 +72,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -86,20 +90,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.core.common.TimeFormatter
 import com.example.core.designsystem.AlbumArtwork
 import com.example.core.designsystem.CompactTrackRow
+import com.example.core.designsystem.CreateArtistPlaylistDialog
 import com.example.core.designsystem.CreatePlaylistDialog
 import com.example.core.designsystem.DeleteTracksConfirmDialog
 import com.example.core.designsystem.LocalMyatoColors
 import com.example.core.designsystem.StaggeredEntryContainer
+import com.example.core.metadata.MusicSearchEngine
 import com.example.core.storage.DuplicateGroup
 import com.example.domain.models.AlbumItem
 import com.example.domain.models.ArtistItem
@@ -107,6 +113,8 @@ import com.example.domain.models.FolderItem
 import com.example.domain.models.GenreItem
 import com.example.domain.models.MusicTrack
 import com.example.domain.models.QueueOriginType
+import com.example.domain.models.SearchFilterMode
+import com.example.domain.models.SearchMatchSource
 import com.example.domain.models.SmartSelectionCriteria
 import com.example.domain.models.TrackSortOrder
 
@@ -224,26 +232,51 @@ fun AllSongsScreen(
     onSaveFormatFilter: (String) -> Unit = {},
     onSmartSelect: (SmartSelectionCriteria, MusicTrack?) -> List<Long>,
     sortTracks: (List<MusicTrack>, TrackSortOrder, String) -> List<MusicTrack>,
+    onCreateArtistPlaylist: (artistName: String, includeCollaborations: Boolean, autoUpdateEnabled: Boolean, customName: String) -> Unit = { _, _, _, _ -> },
 ) {
     val colors = LocalMyatoColors.current
     var query by remember { mutableStateOf("") }
+    var searchFilterMode by remember { mutableStateOf(SearchFilterMode.ALL) }
+    var selectedArtistFilter by remember { mutableStateOf<String?>(null) }
     var sortOrder by remember { mutableStateOf(initialSortOrder) }
     var formatFilter by remember { mutableStateOf(initialFormatFilter) }
     var showSortMenu by remember { mutableStateOf(false) }
     var showSmartSelectMenu by remember { mutableStateOf(false) }
+    var showArtistPickerMenu by remember { mutableStateOf(false) }
     var showDuplicatesDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    var createArtistPlaylistTarget by remember { mutableStateOf<String?>(null) }
 
     val selectedIds = remember { mutableStateListOf<Long>() }
     val isSelectionMode by remember { derivedStateOf { selectedIds.isNotEmpty() } }
 
     val filteredByFormat = remember(tracks, formatFilter) {
-        if (formatFilter == "Todos") tracks
+        if (formatFilter == "Todos" || formatFilter == "Todas") tracks
         else tracks.filter { it.formatExtension.equals(formatFilter, ignoreCase = true) }
     }
-    val displayed = remember(filteredByFormat, sortOrder, query) {
-        sortTracks(filteredByFormat, sortOrder, query)
+
+    val searchResult = remember(filteredByFormat, query, searchFilterMode, selectedArtistFilter, sortOrder) {
+        MusicSearchEngine.searchTracks(
+            tracks = filteredByFormat,
+            query = query,
+            filterMode = searchFilterMode,
+            selectedArtist = selectedArtistFilter,
+            sortOrder = sortOrder,
+        )
+    }
+
+    val displayedHits = searchResult.hits
+    val displayed = remember(displayedHits) { displayedHits.map { it.track } }
+    val allArtistCandidates = remember(tracks) { MusicSearchEngine.extractArtistCandidates(tracks, "") }
+
+    val targetArtistForPlaylist = remember(selectedArtistFilter, searchResult.matchingArtists, query) {
+        selectedArtistFilter ?: searchResult.matchingArtists.firstOrNull()?.takeIf {
+            val normQ = MusicSearchEngine.normalizeText(query)
+            normQ.isNotBlank() && MusicSearchEngine.normalizeText(it.name).let { n ->
+                n == normQ || n.startsWith(normQ)
+            }
+        }?.name
     }
 
     val availableFormats = remember(tracks) {
@@ -397,16 +430,31 @@ fun AllSongsScreen(
                 }
             }
 
-            // Real-time Search Input
+            // Real-time Intelligent Search Input
             OutlinedTextField(
                 value = query,
-                onValueChange = { query = it },
-                placeholder = { Text("Buscar título, artista, álbum ou pasta...") },
+                onValueChange = { newValue ->
+                    query = newValue
+                    if (newValue.isBlank()) {
+                        selectedArtistFilter = null
+                        if (searchFilterMode != SearchFilterMode.ALL) {
+                            searchFilterMode = SearchFilterMode.ALL
+                        }
+                    }
+                },
+                placeholder = { Text("Buscar música, artista, álbum ou gênero...") },
                 leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.primary) },
                 trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) {
-                            Icon(Icons.Rounded.Clear, contentDescription = "Limpar busca", tint = colors.textSecondary)
+                    if (query.isNotEmpty() || selectedArtistFilter != null || searchFilterMode != SearchFilterMode.ALL) {
+                        IconButton(
+                            onClick = {
+                                query = ""
+                                selectedArtistFilter = null
+                                searchFilterMode = SearchFilterMode.ALL
+                            },
+                            modifier = Modifier.testTag("clear_search_button"),
+                        ) {
+                            Icon(Icons.Rounded.Clear, contentDescription = "Limpar pesquisa", tint = colors.textSecondary)
                         }
                     }
                 },
@@ -418,9 +466,193 @@ fun AllSongsScreen(
                     .testTag("songs_search_input"),
             )
 
+            // Search Filter Mode Row: Todos | Artista exato | Artista e colaborações + Artist Picker
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.testTag("search_mode_row"),
+            ) {
+                items(SearchFilterMode.entries) { mode ->
+                    FilterChip(
+                        selected = searchFilterMode == mode,
+                        onClick = { searchFilterMode = mode },
+                        label = { Text(mode.label, maxLines = 1) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = colors.primary,
+                            selectedLabelColor = Color.Black,
+                        ),
+                        modifier = Modifier.testTag("search_mode_${mode.name.lowercase()}"),
+                    )
+                }
+
+                item(key = "artist_picker_chip") {
+                    Box {
+                        FilterChip(
+                            selected = selectedArtistFilter != null,
+                            onClick = {
+                                if (selectedArtistFilter != null) {
+                                    selectedArtistFilter = null
+                                } else {
+                                    showArtistPickerMenu = true
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = if (selectedArtistFilter != null) Icons.Rounded.Close else Icons.Rounded.FilterList,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = selectedArtistFilter?.let { "Artista: $it" } ?: "Filtrar artista",
+                                    maxLines = 1,
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = colors.secondary,
+                                selectedLabelColor = Color.Black,
+                                selectedLeadingIconColor = Color.Black,
+                            ),
+                            modifier = Modifier.testTag("artist_filter_picker_chip"),
+                        )
+
+                        DropdownMenu(
+                            expanded = showArtistPickerMenu,
+                            onDismissRequest = { showArtistPickerMenu = false },
+                            containerColor = colors.card,
+                        ) {
+                            if (allArtistCandidates.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("Nenhum artista encontrado", color = colors.textSecondary) },
+                                    onClick = { showArtistPickerMenu = false },
+                                )
+                            } else {
+                                allArtistCandidates.take(30).forEach { cand ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = "${cand.name} (${cand.totalTrackCount})",
+                                                color = colors.textPrimary,
+                                            )
+                                        },
+                                        leadingIcon = { Icon(Icons.Rounded.Person, contentDescription = null, tint = colors.primary) },
+                                        onClick = {
+                                            selectedArtistFilter = cand.name
+                                            if (searchFilterMode == SearchFilterMode.ALL) {
+                                                searchFilterMode = SearchFilterMode.EXACT_ARTIST
+                                            }
+                                            showArtistPickerMenu = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Matching Artist Suggestion Chips when searching
+            if (query.isNotBlank() && searchResult.matchingArtists.isNotEmpty()) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.testTag("matching_artists_row"),
+                ) {
+                    items(searchResult.matchingArtists.take(8), key = { it.name }) { candidate ->
+                        val isSelectedArtist = selectedArtistFilter != null &&
+                            MusicSearchEngine.normalizeText(selectedArtistFilter!!) == MusicSearchEngine.normalizeText(candidate.name)
+                        val countLabel = if (searchFilterMode == SearchFilterMode.EXACT_ARTIST) {
+                            "${candidate.soloTrackCount}"
+                        } else {
+                            "${candidate.totalTrackCount}"
+                        }
+                        FilterChip(
+                            selected = isSelectedArtist,
+                            onClick = {
+                                if (isSelectedArtist) {
+                                    selectedArtistFilter = null
+                                } else {
+                                    selectedArtistFilter = candidate.name
+                                    if (searchFilterMode == SearchFilterMode.ALL) {
+                                        searchFilterMode = SearchFilterMode.EXACT_ARTIST
+                                    }
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Rounded.Person, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            label = { Text("${candidate.name} ($countLabel)") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = colors.primary,
+                                selectedLabelColor = Color.Black,
+                                selectedLeadingIconColor = Color.Black,
+                            ),
+                            modifier = Modifier.testTag("artist_chip_${candidate.name}"),
+                        )
+                    }
+                }
+            }
+
+            // Result Count & Create Artist Playlist Action Banner
+            if (query.isNotBlank() || selectedArtistFilter != null || searchFilterMode != SearchFilterMode.ALL) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = colors.card,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "${displayedHits.size} música(s) encontrada(s)",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = colors.textPrimary,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.testTag("search_result_count"),
+                            )
+                            val activeLabel = searchResult.activeArtistFilter
+                            if (!activeLabel.isNullOrBlank()) {
+                                val modeSub = if (searchFilterMode == SearchFilterMode.EXACT_ARTIST) {
+                                    "Somente $activeLabel"
+                                } else {
+                                    "$activeLabel + colaborações"
+                                }
+                                Text(
+                                    text = modeSub,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colors.primary,
+                                )
+                            }
+                        }
+
+                        if (!targetArtistForPlaylist.isNullOrBlank()) {
+                            Button(
+                                onClick = { createArtistPlaylistTarget = targetArtistForPlaylist },
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("create_artist_playlist_button"),
+                            ) {
+                                Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Criar playlist deste artista", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
             // Audio format filter chips
             LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(availableFormats) { fmt ->
@@ -450,7 +682,7 @@ fun AllSongsScreen(
                     modifier = Modifier
                         .weight(1f)
                         .clickable(enabled = displayed.isNotEmpty()) {
-                            onPlayTracks(displayed, 0, "Todas as músicas", QueueOriginType.ALL_SONGS)
+                            onPlayTracks(displayed, 0, searchResult.activeArtistFilter ?: "Todas as músicas", QueueOriginType.ALL_SONGS)
                         },
                     shape = RoundedCornerShape(14.dp),
                     color = colors.primary,
@@ -486,40 +718,102 @@ fun AllSongsScreen(
                 }
             }
 
-            // Track List with quick "+ Playlist" button and selection
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .weight(1f),
-                contentPadding = PaddingValues(bottom = if (isSelectionMode) 180.dp else 140.dp),
-            ) {
-                itemsIndexed(
-                    items = displayed,
-                    key = { _, t -> t.id },
-                    contentType = { _, _ -> "track_row" },
-                ) { index, track ->
-                    val isSelected = track.id in selectedIds
-                    StaggeredEntryContainer(index = index) {
-                        CompactTrackRow(
-                            track = track,
-                            isCurrent = track.id == currentTrackId,
-                            isSelectionMode = isSelectionMode,
-                            isSelected = isSelected,
-                            onClick = {
-                                if (isSelectionMode) {
-                                    if (isSelected) selectedIds.remove(track.id) else selectedIds.add(track.id)
-                                } else {
-                                    onPlayTracks(displayed, index, "Todas as músicas", QueueOriginType.ALL_SONGS)
-                                }
-                            },
-                            onLongClick = {
-                                if (isSelected) selectedIds.remove(track.id) else selectedIds.add(track.id)
-                            },
-                            onQuickAddToPlaylist = {
-                                onBatchAddToPlaylists(listOf(track.id))
-                            },
-                            onMoreClick = { onTrackMoreClick(track) },
+            // Track List or Empty State
+            if (displayedHits.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .weight(1f)
+                        .padding(32.dp)
+                        .testTag("search_empty_state"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Rounded.SearchOff,
+                            contentDescription = null,
+                            tint = colors.textSecondary,
+                            modifier = Modifier.size(56.dp),
                         )
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            text = when {
+                                selectedArtistFilter != null -> "Nenhuma música de \"$selectedArtistFilter\" encontrada com este filtro."
+                                query.isNotBlank() -> "Nenhum resultado correspondente para \"${query.trim()}\"."
+                                else -> "Nenhuma música disponível na biblioteca."
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                            color = colors.textPrimary,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "Verifique a grafia ou alterne entre Artista exato, Colaborações ou Todos os resultados.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary,
+                            textAlign = TextAlign.Center,
+                        )
+                        if (query.isNotBlank() || selectedArtistFilter != null || searchFilterMode != SearchFilterMode.ALL) {
+                            Spacer(Modifier.height(14.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    query = ""
+                                    selectedArtistFilter = null
+                                    searchFilterMode = SearchFilterMode.ALL
+                                },
+                                modifier = Modifier.testTag("empty_clear_search_button"),
+                            ) {
+                                Icon(Icons.Rounded.Clear, contentDescription = null, tint = colors.primary)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Limpar pesquisa", color = colors.primary)
+                            }
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .weight(1f),
+                    contentPadding = PaddingValues(bottom = if (isSelectionMode) 180.dp else 140.dp),
+                ) {
+                    itemsIndexed(
+                        items = displayedHits,
+                        key = { _, hit -> hit.track.id },
+                        contentType = { _, _ -> "track_row" },
+                    ) { index, hit ->
+                        val track = hit.track
+                        val isSelected = track.id in selectedIds
+                        val badge = when {
+                            hit.parsedArtists.isCollaboration -> "Feat."
+                            query.isNotBlank() && hit.matchSource == SearchMatchSource.GENRE -> track.genre
+                            query.isNotBlank() && hit.matchSource == SearchMatchSource.ALBUM -> "Álbum"
+                            else -> null
+                        }
+                        StaggeredEntryContainer(index = index) {
+                            CompactTrackRow(
+                                track = track,
+                                isCurrent = track.id == currentTrackId,
+                                isSelectionMode = isSelectionMode,
+                                isSelected = isSelected,
+                                onClick = {
+                                    if (isSelectionMode) {
+                                        if (isSelected) selectedIds.remove(track.id) else selectedIds.add(track.id)
+                                    } else {
+                                        onPlayTracks(displayed, index, searchResult.activeArtistFilter ?: "Todas as músicas", QueueOriginType.ALL_SONGS)
+                                    }
+                                },
+                                onLongClick = {
+                                    if (isSelected) selectedIds.remove(track.id) else selectedIds.add(track.id)
+                                },
+                                onQuickAddToPlaylist = {
+                                    onBatchAddToPlaylists(listOf(track.id))
+                                },
+                                badgeText = badge,
+                                onFixUnknownArtist = { onBatchEditTags(listOf(track.id)) },
+                                onMoreClick = { onTrackMoreClick(track) },
+                            )
+                        }
                     }
                 }
             }
@@ -636,6 +930,17 @@ fun AllSongsScreen(
             },
         )
     }
+    createArtistPlaylistTarget?.let { targetArtist ->
+        CreateArtistPlaylistDialog(
+            artistName = targetArtist,
+            allTracks = tracks,
+            initialIncludeCollaborations = searchFilterMode == SearchFilterMode.ARTIST_AND_COLLABS,
+            onDismiss = { createArtistPlaylistTarget = null },
+            onConfirm = { playlistName, includeCollabs, autoUpdate ->
+                onCreateArtistPlaylist(targetArtist, includeCollabs, autoUpdate, playlistName)
+            },
+        )
+    }
 }
 
 /**
@@ -648,56 +953,184 @@ fun ArtistsScreen(
     onBack: () -> Unit,
     onPlayArtistQueue: (String, List<MusicTrack>) -> Unit,
     onPinShortcut: (String, String, String) -> Unit,
+    onCreateArtistPlaylist: (artistName: String, includeCollaborations: Boolean, autoUpdateEnabled: Boolean, customName: String) -> Unit = { _, _, _, _ -> },
+    onTrackMoreClick: (MusicTrack) -> Unit = {},
+    onEditTrackTags: (Long) -> Unit = {},
 ) {
     val colors = LocalMyatoColors.current
     var selectedArtist by remember { mutableStateOf<String?>(null) }
+    var artistQuery by remember { mutableStateOf("") }
+    var includeCollabs by remember { mutableStateOf(false) }
+    var artistPlaylistDialogTarget by remember { mutableStateOf<String?>(null) }
+
+    BackHandler(enabled = selectedArtist != null) {
+        selectedArtist = null
+    }
+
+    val artistCandidates = remember(tracks, artistQuery) {
+        MusicSearchEngine.extractArtistCandidates(tracks, artistQuery)
+    }
 
     Column(modifier = Modifier.fillMaxSize().background(colors.background)) {
         SimpleHeader(
-            title = selectedArtist ?: "Artistas (${artists.size})",
+            title = selectedArtist ?: "Artistas (${artistCandidates.size})",
             onBack = { if (selectedArtist != null) selectedArtist = null else onBack() },
         )
 
         if (selectedArtist == null) {
-            LazyColumn(contentPadding = PaddingValues(bottom = 140.dp)) {
-                items(artists, key = { it.id }) { artist ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { selectedArtist = artist.name }
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier.size(48.dp).clip(CircleShape).background(colors.card),
-                            contentAlignment = Alignment.Center,
+            OutlinedTextField(
+                value = artistQuery,
+                onValueChange = { artistQuery = it },
+                placeholder = { Text("Buscar artista ou banda...") },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.primary) },
+                trailingIcon = {
+                    if (artistQuery.isNotBlank()) {
+                        IconButton(onClick = { artistQuery = "" }) {
+                            Icon(Icons.Rounded.Clear, contentDescription = "Limpar busca", tint = colors.textSecondary)
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+            )
+
+            if (artistCandidates.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = if (artistQuery.isBlank()) "Nenhum artista encontrado na biblioteca." else "Nenhum artista encontrado para \"$artistQuery\".",
+                        color = colors.textSecondary,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            } else {
+                LazyColumn(contentPadding = PaddingValues(bottom = 140.dp)) {
+                    items(artistCandidates, key = { it.name }) { candidate ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedArtist = candidate.name }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(Icons.Rounded.Person, contentDescription = null, tint = colors.primary)
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(artist.name, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                            Text("${artist.trackCount} músicas • ${artist.albumCount} álbuns", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
-                        }
-                        IconButton(onClick = { onPinShortcut("artist", artist.name, artist.name) }) {
-                            Icon(Icons.Rounded.PlayArrow, contentDescription = "Fixar atalho", tint = colors.primary)
+                            Box(
+                                modifier = Modifier.size(48.dp).clip(CircleShape).background(colors.card),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.Rounded.Person, contentDescription = null, tint = colors.primary)
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(candidate.name, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                                val sub = if (candidate.collabTrackCount > 0) {
+                                    "${candidate.soloTrackCount} solo • ${candidate.collabTrackCount} participação(ões)"
+                                } else {
+                                    "${candidate.soloTrackCount} músicas"
+                                }
+                                Text(sub, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                            }
+                            IconButton(onClick = { artistPlaylistDialogTarget = candidate.name }) {
+                                Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = "Criar playlist deste artista", tint = colors.primary)
+                            }
+                            IconButton(onClick = { onPinShortcut("artist", candidate.name, candidate.name) }) {
+                                Icon(Icons.Rounded.PlayArrow, contentDescription = "Fixar atalho", tint = colors.primary)
+                            }
                         }
                     }
                 }
             }
         } else {
-            val artistTracks = remember(selectedArtist, tracks) { tracks.filter { it.artist == selectedArtist } }
-            LazyColumn(contentPadding = PaddingValues(bottom = 140.dp)) {
-                itemsIndexed(artistTracks, key = { _, t -> t.id }) { idx, track ->
-                    CompactTrackRow(
-                        track = track,
-                        isCurrent = false,
-                        onClick = { onPlayArtistQueue(selectedArtist!!, artistTracks.drop(idx) + artistTracks.take(idx)) },
-                        onMoreClick = {},
+            val artistName = selectedArtist!!
+            val artistTracks = remember(artistName, tracks, includeCollabs) {
+                MusicSearchEngine.tracksForArtist(tracks, artistName, includeCollaborations = includeCollabs)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FilterChip(
+                    selected = !includeCollabs,
+                    onClick = { includeCollabs = false },
+                    label = { Text("Artista exato") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = colors.primary,
+                        selectedLabelColor = Color.Black,
+                    ),
+                )
+                FilterChip(
+                    selected = includeCollabs,
+                    onClick = { includeCollabs = true },
+                    leadingIcon = { Icon(Icons.Rounded.Group, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    label = { Text("Com colaborações") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = colors.primary,
+                        selectedLabelColor = Color.Black,
+                        selectedLeadingIconColor = Color.Black,
+                    ),
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "${artistTracks.size} música(s)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary,
+                )
+            }
+
+            Button(
+                onClick = { artistPlaylistDialogTarget = artistName },
+                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+            ) {
+                Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Criar playlist deste artista", fontWeight = FontWeight.Bold)
+            }
+
+            if (artistTracks.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "Nenhuma música de \"$artistName\" disponível neste filtro.",
+                        color = colors.textSecondary,
+                        textAlign = TextAlign.Center,
                     )
+                }
+            } else {
+                LazyColumn(contentPadding = PaddingValues(bottom = 140.dp)) {
+                    itemsIndexed(artistTracks, key = { _, t -> t.id }) { idx, track ->
+                        val parsed = MusicSearchEngine.parseTrackArtists(track)
+                        CompactTrackRow(
+                            track = track,
+                            isCurrent = false,
+                            badgeText = if (parsed.isCollaboration) "Feat." else null,
+                            onFixUnknownArtist = { onEditTrackTags(track.id) },
+                            onClick = { onPlayArtistQueue(artistName, artistTracks.drop(idx) + artistTracks.take(idx)) },
+                            onMoreClick = { onTrackMoreClick(track) },
+                        )
+                    }
                 }
             }
         }
+    }
+
+    artistPlaylistDialogTarget?.let { targetArtist ->
+        CreateArtistPlaylistDialog(
+            artistName = targetArtist,
+            allTracks = tracks,
+            initialIncludeCollaborations = includeCollabs,
+            onDismiss = { artistPlaylistDialogTarget = null },
+            onConfirm = { playlistName, withCollabs, autoUpdate ->
+                onCreateArtistPlaylist(targetArtist, withCollabs, autoUpdate, playlistName)
+            },
+        )
     }
 }
 

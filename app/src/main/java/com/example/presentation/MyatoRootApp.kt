@@ -513,6 +513,9 @@ fun MyatoRootApp(
                                         viewModel.selectTracksByCriteria(tracks, criteria, ref)
                                     },
                                     sortTracks = { list, order, q -> viewModel.sortTracks(list, order, q) },
+                                    onCreateArtistPlaylist = { artist, collabs, autoUpdate, customName ->
+                                        viewModel.createArtistPlaylist(artist, collabs, autoUpdate, customName)
+                                    },
                                 )
                             }
 
@@ -525,6 +528,13 @@ fun MyatoRootApp(
                                         viewModel.playTracks(list, 0, name, QueueOriginType.ARTIST, name)
                                     },
                                     onPinShortcut = { type, key, label -> viewModel.pinShortcut(type, key, label) },
+                                    onCreateArtistPlaylist = { artist, collabs, autoUpdate, customName ->
+                                        viewModel.createArtistPlaylist(artist, collabs, autoUpdate, customName)
+                                    },
+                                    onTrackMoreClick = { contextMenuTrack = it },
+                                    onEditTrackTags = { trackId ->
+                                        navController.navigate(MyatoRoute.TagEditor(trackId.toString()))
+                                    },
                                 )
                             }
 
@@ -601,6 +611,19 @@ fun MyatoRootApp(
                                         viewModel.addTracksToPlaylistsWithResult(pids, ids, allowDup)
                                     },
                                     onTrackMoreClick = { contextMenuTrack = it },
+                                    onCreateArtistPlaylist = { artist, collabs, autoUpdate, customName ->
+                                        viewModel.createArtistPlaylist(artist, collabs, autoUpdate, customName)
+                                    },
+                                    onUpdatePlaylistDetails = { pid, name, cover, autoUpdate, collabs ->
+                                        viewModel.updatePlaylistDetails(pid, name, cover, autoUpdate, collabs)
+                                    },
+                                    onPickPlaylistCover = { pid, uri ->
+                                        viewModel.updatePlaylistCoverFromPicker(pid, uri)
+                                    },
+                                    onSetPlaylistAutoUpdate = { pid, autoUpdate, collabs ->
+                                        viewModel.setPlaylistAutoUpdate(pid, autoUpdate, collabs)
+                                    },
+                                    onSyncAutoPlaylists = { viewModel.syncAutoUpdatePlaylists() },
                                 )
                             }
 

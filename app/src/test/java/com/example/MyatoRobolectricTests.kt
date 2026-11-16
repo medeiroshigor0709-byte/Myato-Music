@@ -12,6 +12,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
+import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.core.audio.PlaybackUiState
 import com.example.core.common.AudioFormatSupport
@@ -21,6 +23,7 @@ import com.example.core.database.FavoriteEntity
 import com.example.core.database.MusicNoteEntity
 import com.example.core.database.MusicTrackEntity
 import com.example.core.database.MyatoDatabase
+import com.example.core.database.toDomain
 import com.example.core.database.toEntity
 import com.example.core.designsystem.AppFontCatalog
 import com.example.core.designsystem.BuiltInThemes
@@ -764,6 +767,445 @@ class MyatoRobolectricTests {
             assertNotNull(typo.headlineLarge.fontFamily)
             assertNotNull(typo.bodyMedium.fontFamily)
         }
+    }
+
+    private fun sampleBrazilianRapTracks(): List<MusicTrackEntity> = listOf(
+        MusicTrackEntity(
+            id = 1001L,
+            mediaStoreId = 1001L,
+            title = "A Praga",
+            artist = "Haikaiss",
+            album = "Teto Baixo",
+            albumArtist = "Haikaiss",
+            genre = "Rap Nacional",
+            albumId = 1L,
+            artistId = 1L,
+            durationMs = 210_000L,
+            sizeBytes = 5_000_000L,
+            filePath = "/music/haikaiss/a_praga.mp3",
+            folderPath = "/music/haikaiss",
+            contentUri = "content://1001",
+            albumArtUri = "content://art/1001",
+        ),
+        MusicTrackEntity(
+            id = 1002L,
+            mediaStoreId = 1002L,
+            title = "Linhas Tortas",
+            artist = "Haikaiss",
+            album = "Fotografia de um Instante",
+            albumArtist = "Haikaiss",
+            genre = "Rap Nacional",
+            albumId = 2L,
+            artistId = 1L,
+            durationMs = 195_000L,
+            sizeBytes = 4_800_000L,
+            filePath = "/music/haikaiss/linhas_tortas.mp3",
+            folderPath = "/music/haikaiss",
+            contentUri = "content://1002",
+        ),
+        MusicTrackEntity(
+            id = 1003L,
+            mediaStoreId = 1003L,
+            title = "Rap Lord",
+            artist = "Haikaiss feat. Jonas Bento",
+            album = "Teto Baixo",
+            albumArtist = "Haikaiss",
+            genre = "Rap Nacional",
+            albumId = 1L,
+            artistId = 1L,
+            durationMs = 230_000L,
+            sizeBytes = 5_200_000L,
+            filePath = "/music/haikaiss/rap_lord.mp3",
+            folderPath = "/music/haikaiss",
+            contentUri = "content://1003",
+        ),
+        MusicTrackEntity(
+            id = 1004L,
+            mediaStoreId = 1004L,
+            title = "Favela Vive 3 (part. Haikaiss)",
+            artist = "ADL",
+            album = "Singles",
+            albumArtist = "ADL",
+            genre = "Rap Nacional",
+            albumId = 3L,
+            artistId = 2L,
+            durationMs = 310_000L,
+            sizeBytes = 7_000_000L,
+            filePath = "/music/adl/favela_vive_3.mp3",
+            folderPath = "/music/adl",
+            contentUri = "content://1004",
+        ),
+        MusicTrackEntity(
+            id = 1005L,
+            mediaStoreId = 1005L,
+            title = "Morgana",
+            artist = "Kamaitachi",
+            album = "Contos",
+            albumArtist = "Kamaitachi",
+            genre = "Rap Nacional",
+            albumId = 4L,
+            artistId = 3L,
+            durationMs = 205_000L,
+            sizeBytes = 4_500_000L,
+            filePath = "/music/kamaitachi/morgana.mp3",
+            folderPath = "/music/kamaitachi",
+            contentUri = "content://1005",
+        ),
+        MusicTrackEntity(
+            id = 1006L,
+            mediaStoreId = 1006L,
+            title = "Plutão",
+            artist = "VMZ",
+            album = "Espaço",
+            albumArtist = "VMZ",
+            genre = "Rap Nacional",
+            albumId = 5L,
+            artistId = 4L,
+            durationMs = 190_000L,
+            sizeBytes = 4_100_000L,
+            filePath = "/music/vmz/plutao.mp3",
+            folderPath = "/music/vmz",
+            contentUri = "content://1006",
+        ),
+        MusicTrackEntity(
+            id = 1007L,
+            mediaStoreId = 1007L,
+            title = "Vibe Espacial",
+            artist = "VMZ",
+            album = "Espaço",
+            albumArtist = "VMZ",
+            genre = "Sad Trap",
+            albumId = 5L,
+            artistId = 4L,
+            durationMs = 185_000L,
+            sizeBytes = 4_000_000L,
+            filePath = "/music/vmz/vibe.mp3",
+            folderPath = "/music/vmz",
+            contentUri = "content://1007",
+        ),
+    )
+
+    @Test
+    fun `teste 1 pesquisa haikaiss prioriza haikaiss e nao mistura kamaitachi ou vmz`() = runBlocking {
+        val entities = sampleBrazilianRapTracks()
+        db.trackDao().upsertTracks(entities)
+        val domainTracks = db.trackDao().getAllTracksSync().map { it.toDomain() }
+
+        val result = com.example.core.metadata.MusicSearchEngine.searchTracks(
+            tracks = domainTracks,
+            query = "Haikaiss",
+            filterMode = com.example.domain.models.SearchFilterMode.ALL,
+        )
+
+        val returnedIds = result.hits.map { it.track.id }
+        assertTrue(1001L in returnedIds)
+        assertTrue(1002L in returnedIds)
+        assertFalse("Kamaitachi não pode aparecer ao pesquisar Haikaiss", 1005L in returnedIds)
+        assertFalse("VMZ não pode aparecer ao pesquisar Haikaiss", 1006L in returnedIds)
+        assertFalse("VMZ não pode aparecer ao pesquisar Haikaiss", 1007L in returnedIds)
+        assertEquals(
+            com.example.domain.models.SearchMatchSource.EXACT_ARTIST,
+            result.hits.first().matchSource,
+        )
+    }
+
+    @Test
+    fun `teste 2 playlist do artista haikaiss adiciona apenas musicas de haikaiss sem duplicadas`() = runBlocking {
+        db.trackDao().upsertTracks(sampleBrazilianRapTracks())
+        val plRepo = PlaylistRepository(context, db)
+
+        val playlistId = plRepo.createArtistPlaylist(
+            artistName = "Haikaiss",
+            includeCollaborations = false,
+            autoUpdateEnabled = false,
+            customName = "Haikaiss",
+        )
+
+        val playlist = plRepo.playlistsFlow.first().first { it.id == playlistId }
+        assertEquals("Haikaiss", playlist.name)
+        assertEquals("Haikaiss", playlist.artistFilterName)
+
+        val trackIds = plRepo.getPlaylistTrackIdsSync(playlistId)
+        assertEquals(listOf(1001L, 1002L), trackIds.sorted())
+        assertEquals(trackIds.size, trackIds.distinct().size)
+        assertFalse(1005L in trackIds) // Kamaitachi excluded
+        assertFalse(1006L in trackIds) // VMZ excluded
+    }
+
+    @Test
+    fun `teste 3 colaboracoes aparecem apenas quando filtro de colaboracoes esta habilitado`() = runBlocking {
+        db.trackDao().upsertTracks(sampleBrazilianRapTracks())
+        val domainTracks = db.trackDao().getAllTracksSync().map { it.toDomain() }
+
+        val soloResult = com.example.core.metadata.MusicSearchEngine.searchTracks(
+            tracks = domainTracks,
+            query = "Haikaiss",
+            filterMode = com.example.domain.models.SearchFilterMode.EXACT_ARTIST,
+            selectedArtist = "Haikaiss",
+        )
+        assertEquals(listOf(1001L, 1002L), soloResult.hits.map { it.track.id }.sorted())
+
+        val collabResult = com.example.core.metadata.MusicSearchEngine.searchTracks(
+            tracks = domainTracks,
+            query = "Haikaiss",
+            filterMode = com.example.domain.models.SearchFilterMode.ARTIST_AND_COLLABS,
+            selectedArtist = "Haikaiss",
+        )
+        assertEquals(listOf(1001L, 1002L, 1003L, 1004L), collabResult.hits.map { it.track.id }.sorted())
+
+        val plRepo = PlaylistRepository(context, db)
+        val collabPlaylistId = plRepo.createArtistPlaylist(
+            artistName = "Haikaiss",
+            includeCollaborations = true,
+            autoUpdateEnabled = false,
+            customName = "Haikaiss + Feats",
+        )
+        assertEquals(
+            listOf(1001L, 1002L, 1003L, 1004L),
+            plRepo.getPlaylistTrackIdsSync(collabPlaylistId).sorted(),
+        )
+    }
+
+    @Test
+    fun `teste 4 pesquisa por outros artistas como VMZ funciona sem misturar haikaiss ou kamaitachi`() = runBlocking {
+        db.trackDao().upsertTracks(sampleBrazilianRapTracks())
+        val domainTracks = db.trackDao().getAllTracksSync().map { it.toDomain() }
+
+        val vmzResult = com.example.core.metadata.MusicSearchEngine.searchTracks(
+            tracks = domainTracks,
+            query = "vmz",
+            filterMode = com.example.domain.models.SearchFilterMode.EXACT_ARTIST,
+        )
+        assertEquals(listOf(1006L, 1007L), vmzResult.hits.map { it.track.id }.sorted())
+        assertFalse(1001L in vmzResult.hits.map { it.track.id })
+        assertFalse(1005L in vmzResult.hits.map { it.track.id })
+    }
+
+    @Test
+    fun `teste 5 persistencia mantem playlists, ordem, capas e configuracoes apos fechar e reabrir banco`() = runBlocking {
+        val tempDbFile = File.createTempFile("myato_persist_test_", ".db")
+        try {
+            val db1 = Room.databaseBuilder(context, MyatoDatabase::class.java, tempDbFile.absolutePath)
+                .allowMainThreadQueries()
+                .build()
+            db1.trackDao().upsertTracks(sampleBrazilianRapTracks())
+            val repo1 = PlaylistRepository(context, db1)
+            val plId = repo1.createArtistPlaylist(
+                artistName = "Haikaiss",
+                includeCollaborations = true,
+                autoUpdateEnabled = true,
+                customName = "Haikaiss Persistida",
+            )
+            repo1.updatePlaylistDetails(
+                playlistId = plId,
+                newName = "Haikaiss Editada",
+                coverUri = "file:///custom/haikaiss_cover.jpg",
+                autoUpdateEnabled = true,
+                includeCollaborations = false,
+            )
+            repo1.reorderPlaylist(plId, listOf(1002L, 1001L))
+            db1.close()
+
+            // Reopen database simulating full app restart
+            val db2 = Room.databaseBuilder(context, MyatoDatabase::class.java, tempDbFile.absolutePath)
+                .allowMainThreadQueries()
+                .build()
+            try {
+                val repo2 = PlaylistRepository(context, db2)
+                val restored = repo2.playlistsFlow.first().first { it.id == plId }
+                assertEquals("Haikaiss Editada", restored.name)
+                assertEquals("file:///custom/haikaiss_cover.jpg", restored.coverUri)
+                assertEquals("Haikaiss", restored.artistFilterName)
+                assertTrue(restored.autoUpdateByArtist)
+                assertFalse(restored.includeCollaborations)
+                assertEquals(listOf(1002L, 1001L), repo2.getPlaylistTrackIdsSync(plId))
+            } finally {
+                db2.close()
+            }
+        } finally {
+            tempDbFile.delete()
+            File("${tempDbFile.absolutePath}-wal").delete()
+            File("${tempDbFile.absolutePath}-shm").delete()
+        }
+    }
+
+    @Test
+    fun `teste 6 atualizacao da biblioteca sincroniza playlist automatica do artista quando habilitada`() = runBlocking {
+        db.trackDao().upsertTracks(sampleBrazilianRapTracks())
+        val plRepo = PlaylistRepository(context, db)
+
+        val autoPlId = plRepo.createArtistPlaylist(
+            artistName = "Haikaiss",
+            includeCollaborations = false,
+            autoUpdateEnabled = true,
+            customName = "Haikaiss Auto",
+        )
+        val manualPlId = plRepo.createArtistPlaylist(
+            artistName = "Haikaiss",
+            includeCollaborations = false,
+            autoUpdateEnabled = false,
+            customName = "Haikaiss Manual",
+        )
+        assertEquals(listOf(1001L, 1002L), plRepo.getPlaylistTrackIdsSync(autoPlId).sorted())
+
+        // Add new Haikaiss track + new Kamaitachi & VMZ tracks to library
+        val newHaikaiss = sampleBrazilianRapTracks().first().copy(
+            id = 1099L,
+            mediaStoreId = 1099L,
+            title = "Bosque das Ilusões",
+            artist = "Haikaiss",
+            filePath = "/music/haikaiss/bosque.mp3",
+            contentUri = "content://1099",
+        )
+        val newKamaitachi = sampleBrazilianRapTracks().first().copy(
+            id = 1100L,
+            mediaStoreId = 1100L,
+            title = "Cabelos Arco-Íris",
+            artist = "Kamaitachi",
+            filePath = "/music/kamaitachi/arco_iris.mp3",
+            contentUri = "content://1100",
+        )
+        db.trackDao().upsertTracks(listOf(newHaikaiss, newKamaitachi))
+
+        val addedCount = plRepo.syncAutoUpdateArtistPlaylists()
+        assertEquals(1, addedCount)
+
+        val autoIds = plRepo.getPlaylistTrackIdsSync(autoPlId).sorted()
+        assertEquals(listOf(1001L, 1002L, 1099L), autoIds)
+        assertFalse(1100L in autoIds)
+
+        // Manual playlist (autoUpdate = false) must NOT auto-update
+        assertEquals(listOf(1001L, 1002L), plRepo.getPlaylistTrackIdsSync(manualPlId).sorted())
+    }
+
+    @Test
+    fun `all songs search ui displays artist filter, result count, create artist playlist dialog, and empty state`() {
+        val domainTracks = listOf(
+            MusicTrack(
+                id = 1L, mediaStoreId = 1L, title = "A Praga", artist = "Haikaiss", album = "Teto Baixo",
+                albumId = 1L, artistId = 1L, durationMs = 200_000L, sizeBytes = 1000L,
+                filePath = "/music/1.mp3", folderPath = "/music", contentUri = "content://1",
+            ),
+            MusicTrack(
+                id = 2L, mediaStoreId = 2L, title = "Morgana", artist = "Kamaitachi", album = "Contos",
+                albumId = 2L, artistId = 2L, durationMs = 200_000L, sizeBytes = 1000L,
+                filePath = "/music/2.mp3", folderPath = "/music", contentUri = "content://2",
+            ),
+        )
+        var createdArtist = ""
+        var createdAutoUpdate = false
+
+        composeRule.setContent {
+            MyatoMusicTheme(activeTheme = BuiltInThemes.MidnightOrange) {
+                com.example.feature.library.AllSongsScreen(
+                    tracks = domainTracks,
+                    currentTrackId = null,
+                    duplicates = emptyList(),
+                    onBack = {},
+                    onRefresh = {},
+                    onScanDuplicates = {},
+                    onPlayTracks = { _, _, _, _ -> },
+                    onBatchAddToPlaylists = {},
+                    onCreatePlaylistWithTracks = { _, _ -> },
+                    onBatchAddToQueue = {},
+                    onBatchShare = {},
+                    onBatchDeleteFiles = {},
+                    onBatchEditTags = {},
+                    onTrackMoreClick = {},
+                    onSmartSelect = { _, _ -> emptyList() },
+                    sortTracks = { list, _, _ -> list },
+                    onCreateArtistPlaylist = { artist, _, autoUpdate, _ ->
+                        createdArtist = artist
+                        createdAutoUpdate = autoUpdate
+                    },
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("songs_search_input").performTextInput("Haikaiss")
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("search_result_count").assertIsDisplayed()
+        composeRule.onNodeWithText("1 música(s) encontrada(s)").assertIsDisplayed()
+        composeRule.onNodeWithTag("create_artist_playlist_button").assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("confirm_create_artist_playlist_button").assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
+        assertEquals("Haikaiss", createdArtist)
+        assertTrue(createdAutoUpdate)
+
+        // Clear search and test empty state on non-matching query
+        composeRule.onNodeWithTag("clear_search_button").performClick()
+        composeRule.onNodeWithTag("songs_search_input").performTextInput("ArtistaInexistenteXYZ")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("search_empty_state").assertIsDisplayed()
+    }
+
+    @Test
+    fun `playlists screen shows smart artist badge, auto update controls, and manual add confirmation`() {
+        val domainTracks = listOf(
+            MusicTrack(
+                id = 1L, mediaStoreId = 1L, title = "A Praga", artist = "Haikaiss", album = "Teto Baixo",
+                albumId = 1L, artistId = 1L, durationMs = 200_000L, sizeBytes = 1000L,
+                filePath = "/music/1.mp3", folderPath = "/music", contentUri = "content://1",
+            ),
+            MusicTrack(
+                id = 2L, mediaStoreId = 2L, title = "Plutão", artist = "VMZ", album = "Espaço",
+                albumId = 2L, artistId = 2L, durationMs = 190_000L, sizeBytes = 1000L,
+                filePath = "/music/2.mp3", folderPath = "/music", contentUri = "content://2",
+            ),
+        )
+        val smartPlaylist = com.example.domain.models.Playlist(
+            id = 55L,
+            name = "Haikaiss",
+            trackCount = 1,
+            totalDurationMs = 200_000L,
+            artistFilterName = "Haikaiss",
+            autoUpdateByArtist = true,
+            includeCollaborations = false,
+        )
+        var addedTrackIds: List<Long> = emptyList()
+
+        composeRule.setContent {
+            MyatoMusicTheme(activeTheme = BuiltInThemes.MidnightOrange) {
+                com.example.feature.queues.PlaylistsScreen(
+                    playlists = listOf(smartPlaylist),
+                    allTracks = domainTracks,
+                    observePlaylistTrackIds = { kotlinx.coroutines.flow.flowOf(listOf(1L)) },
+                    onCreatePlaylist = {},
+                    onRenamePlaylist = { _, _ -> },
+                    onDeletePlaylist = {},
+                    onPlayPlaylist = { _, _, _ -> },
+                    onRemoveTrackFromPlaylist = { _, _ -> },
+                    onReorderPlaylist = { _, _ -> },
+                    onAddTracksToPlaylist = { _, _ -> },
+                    onExportM3u = { _, _ -> },
+                    onImportM3u = { _, _ -> },
+                    onAddTracksToPlaylistsWithResult = { _, ids, _ -> addedTrackIds = ids },
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Auto • Haikaiss").assertIsDisplayed()
+        composeRule.onNodeWithTag("playlist_card_55").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("smart_artist_playlist_card").assertIsDisplayed()
+        composeRule.onNodeWithTag("playlist_auto_update_switch").assertIsDisplayed()
+        composeRule.onNodeWithTag("playlist_add_songs_button").performClick()
+        composeRule.waitForIdle()
+
+        // Select VMZ track manually and go through confirmation summary step
+        composeRule.onNodeWithText("Plutão").performClick()
+        composeRule.onNodeWithTag("review_manual_add_tracks_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("manual_add_confirmation_list").assertIsDisplayed()
+        composeRule.onNodeWithTag("confirm_manual_add_tracks_button").performClick()
+        composeRule.waitForIdle()
+        assertEquals(listOf(2L), addedTrackIds)
     }
 }
 

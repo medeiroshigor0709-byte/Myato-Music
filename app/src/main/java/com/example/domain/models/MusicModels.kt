@@ -82,6 +82,9 @@ data class Playlist(
     val totalDurationMs: Long = 0L,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
+    val artistFilterName: String? = null,
+    val autoUpdateByArtist: Boolean = false,
+    val includeCollaborations: Boolean = false,
 )
 
 @Serializable

@@ -13,6 +13,7 @@ import com.example.core.database.PlaylistTrackEntity
 import com.example.core.database.toDomain
 import com.example.core.database.toEntity
 import com.example.core.designsystem.BuiltInThemes
+import com.example.core.metadata.MusicSearchEngine
 import com.example.core.storage.DuplicateGroup
 import com.example.core.storage.LibraryScanResult
 import com.example.core.storage.MediaStoreScanner
@@ -120,9 +121,141 @@ class PlaylistRepository(
     suspend fun createPlaylistWithTracks(name: String, trackIds: List<Long>, description: String = ""): Long {
         val pid = createPlaylist(name, description)
         if (trackIds.isNotEmpty()) {
-            database.playlistDao().replacePlaylistOrder(pid, trackIds)
+            database.playlistDao().replacePlaylistOrder(pid, trackIds.distinct())
         }
         return pid
+    }
+
+    suspend fun createArtistPlaylist(
+        artistName: String,
+        includeCollaborations: Boolean = false,
+        autoUpdateEnabled: Boolean = true,
+        customName: String? = null,
+    ): Long {
+        val cleanArtist = artistName.trim().ifBlank { MusicSearchEngine.UNKNOWN_ARTIST_LABEL }
+        val finalName = customName?.trim()?.ifBlank { cleanArtist } ?: cleanArtist
+        val allTracks = database.trackDao().getAllTracksSync().map { it.toDomain() }
+        val matchedTracks = MusicSearchEngine.tracksForArtist(
+            tracks = allTracks,
+            artistName = cleanArtist,
+            includeCollaborations = includeCollaborations,
+        )
+        val matchedIds = matchedTracks.map { it.id }.distinct()
+        val firstCover = matchedTracks.firstOrNull { !it.albumArtUri.isNullOrBlank() }?.albumArtUri
+        val now = System.currentTimeMillis()
+        val pid = database.playlistDao().insertPlaylist(
+            PlaylistEntity(
+                name = finalName,
+                description = if (includeCollaborations) {
+                    "Playlist do artista $cleanArtist (com colaborações)"
+                } else {
+                    "Playlist exclusiva de $cleanArtist"
+                },
+                coverUri = firstCover,
+                lastUsedAt = now,
+                createdAt = now,
+                updatedAt = now,
+                artistFilterName = cleanArtist,
+                autoUpdateByArtist = autoUpdateEnabled,
+                includeCollaborations = includeCollaborations,
+            )
+        )
+        if (matchedIds.isNotEmpty()) {
+            database.playlistDao().replacePlaylistOrder(pid, matchedIds)
+        }
+        return pid
+    }
+
+    suspend fun setPlaylistAutoUpdate(
+        playlistId: Long,
+        autoUpdateEnabled: Boolean,
+        includeCollaborations: Boolean? = null,
+    ): Int {
+        val existing = database.playlistDao().getPlaylistById(playlistId) ?: return 0
+        val updated = existing.copy(
+            autoUpdateByArtist = autoUpdateEnabled,
+            includeCollaborations = includeCollaborations ?: existing.includeCollaborations,
+            updatedAt = System.currentTimeMillis(),
+        )
+        database.playlistDao().updatePlaylist(updated)
+        return if (updated.autoUpdateByArtist && !updated.artistFilterName.isNullOrBlank()) {
+            syncPlaylistForArtistEntity(updated)
+        } else {
+            0
+        }
+    }
+
+    suspend fun updatePlaylistDetails(
+        playlistId: Long,
+        newName: String,
+        coverUri: String?,
+        autoUpdateEnabled: Boolean? = null,
+        includeCollaborations: Boolean? = null,
+    ) {
+        val existing = database.playlistDao().getPlaylistById(playlistId) ?: return
+        val updated = existing.copy(
+            name = newName.trim().ifBlank { existing.name },
+            coverUri = coverUri?.trim()?.ifBlank { null },
+            autoUpdateByArtist = autoUpdateEnabled ?: existing.autoUpdateByArtist,
+            includeCollaborations = includeCollaborations ?: existing.includeCollaborations,
+            updatedAt = System.currentTimeMillis(),
+        )
+        database.playlistDao().updatePlaylist(updated)
+        if (updated.autoUpdateByArtist && !updated.artistFilterName.isNullOrBlank()) {
+            syncPlaylistForArtistEntity(updated)
+        }
+    }
+
+    suspend fun persistPlaylistCoverImage(playlistId: Long, sourceUri: Uri): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val coversDir = File(context.filesDir, "playlist_covers").apply { mkdirs() }
+            val destFile = File(coversDir, "playlist_${playlistId}_${System.currentTimeMillis()}.jpg")
+            context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                destFile.outputStream().use { output -> input.copyTo(output) }
+            } ?: return@runCatching null
+            val fileUri = Uri.fromFile(destFile).toString()
+            updatePlaylistCover(playlistId, fileUri)
+            fileUri
+        }.getOrNull()
+    }
+
+    suspend fun syncAutoUpdateArtistPlaylists(): Int {
+        val playlists = database.playlistDao().getPlaylistsSync()
+            .filter { it.autoUpdateByArtist && !it.artistFilterName.isNullOrBlank() }
+        if (playlists.isEmpty()) return 0
+
+        val allTracks = database.trackDao().getAllTracksSync().map { it.toDomain() }
+        var totalAdded = 0
+        playlists.forEach { pl ->
+            totalAdded += syncPlaylistForArtistEntity(pl, allTracks)
+        }
+        return totalAdded
+    }
+
+    private suspend fun syncPlaylistForArtistEntity(
+        playlist: PlaylistEntity,
+        cachedTracks: List<MusicTrack>? = null,
+    ): Int {
+        val artistName = playlist.artistFilterName?.takeIf { it.isNotBlank() } ?: return 0
+        val allTracks = cachedTracks ?: database.trackDao().getAllTracksSync().map { it.toDomain() }
+        val matched = MusicSearchEngine.tracksForArtist(
+            tracks = allTracks,
+            artistName = artistName,
+            includeCollaborations = playlist.includeCollaborations,
+        )
+        val existingIds = database.playlistDao().getPlaylistEntriesSync(playlist.id).map { it.trackId }
+        val existingSet = existingIds.toSet()
+        val newIds = matched.map { it.id }.filter { it !in existingSet }.distinct()
+        if (newIds.isNotEmpty()) {
+            database.playlistDao().replacePlaylistOrder(playlist.id, existingIds + newIds)
+            if (playlist.coverUri.isNullOrBlank()) {
+                val art = matched.firstOrNull { !it.albumArtUri.isNullOrBlank() }?.albumArtUri
+                if (!art.isNullOrBlank()) {
+                    database.playlistDao().updatePlaylistCover(playlist.id, art)
+                }
+            }
+        }
+        return newIds.size
     }
 
     suspend fun renamePlaylist(playlistId: Long, newName: String) {

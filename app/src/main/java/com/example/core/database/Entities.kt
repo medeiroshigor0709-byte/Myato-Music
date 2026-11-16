@@ -82,6 +82,9 @@ data class PlaylistEntity(
     val isFavorite: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
+    val artistFilterName: String? = null,
+    val autoUpdateByArtist: Boolean = false,
+    val includeCollaborations: Boolean = false,
 )
 
 @Entity(

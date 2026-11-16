@@ -30,7 +30,7 @@ import kotlinx.coroutines.launch
         AppSettingsEntity::class,
         BackupMetadataEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class MyatoDatabase : RoomDatabase() {
@@ -80,6 +80,14 @@ abstract class MyatoDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE playlists ADD COLUMN artistFilterName TEXT")
+                db.execSQL("ALTER TABLE playlists ADD COLUMN autoUpdateByArtist INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE playlists ADD COLUMN includeCollaborations INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getInstance(context: Context): MyatoDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: buildDatabase(context.applicationContext).also { db ->
@@ -101,7 +109,7 @@ abstract class MyatoDatabase : RoomDatabase() {
                 MyatoDatabase::class.java,
                 DATABASE_NAME,
             )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
         }
 

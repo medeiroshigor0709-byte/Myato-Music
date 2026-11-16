@@ -300,4 +300,89 @@ class MyatoUnitTests {
         assertEquals(listOf(102L, 105L), duplicates)
         assertEquals(listOf(103L, 104L), uniqueToAdd)
     }
+
+    @Test
+    fun `music search engine normalizes accents, case, whitespace and isolates unknown artists`() {
+        assertEquals("haikaiss", com.example.core.metadata.MusicSearchEngine.normalizeText("  Haïkaíss   "))
+        assertEquals("kamaitachi", com.example.core.metadata.MusicSearchEngine.normalizeText("KAMAITACHI"))
+
+        assertTrue(com.example.core.metadata.MusicSearchEngine.isUnknownArtist(""))
+        assertTrue(com.example.core.metadata.MusicSearchEngine.isUnknownArtist("<unknown>"))
+        assertTrue(com.example.core.metadata.MusicSearchEngine.isUnknownArtist("Unknown Artist"))
+        assertEquals("Artista desconhecido", com.example.core.metadata.MusicSearchEngine.sanitizeArtistName("<unknown>"))
+        assertEquals("Artista desconhecido", com.example.core.metadata.MusicSearchEngine.sanitizeArtistName("   "))
+        assertEquals("Haikaiss", com.example.core.metadata.MusicSearchEngine.sanitizeArtistName("  Haikaiss  "))
+    }
+
+    @Test
+    fun `music search engine separates solo tracks from collaborations and preserves named duos`() {
+        val solo = MusicTrack(
+            id = 1L, mediaStoreId = 1L, title = "A Praga", artist = "Haikaiss", album = "Teto Baixo",
+            albumId = 1L, artistId = 1L, durationMs = 200_000L, sizeBytes = 1000L,
+            filePath = "/music/haikaiss.mp3", folderPath = "/music", contentUri = "content://1",
+        )
+        val collabArtistField = solo.copy(
+            id = 2L, mediaStoreId = 2L, title = "Rap Lord", artist = "Haikaiss feat. Rashid",
+        )
+        val collabTitleField = solo.copy(
+            id = 3L, mediaStoreId = 3L, title = "Sessão Cypher (part. Haikaiss)", artist = "ADL",
+        )
+        val namedDuo = solo.copy(
+            id = 4L, mediaStoreId = 4L, title = "The Sound of Silence", artist = "Simon & Garfunkel",
+            albumArtist = "Simon & Garfunkel",
+        )
+
+        val parsedSolo = com.example.core.metadata.MusicSearchEngine.parseTrackArtists(solo)
+        assertFalse(parsedSolo.isCollaboration)
+        assertEquals(listOf("Haikaiss"), parsedSolo.primaryArtists)
+
+        val parsedCollab1 = com.example.core.metadata.MusicSearchEngine.parseTrackArtists(collabArtistField)
+        assertTrue(parsedCollab1.isCollaboration)
+        assertEquals(listOf("Haikaiss"), parsedCollab1.primaryArtists)
+        assertEquals(listOf("Rashid"), parsedCollab1.featuredArtists)
+
+        val parsedCollab2 = com.example.core.metadata.MusicSearchEngine.parseTrackArtists(collabTitleField)
+        assertTrue(parsedCollab2.isCollaboration)
+        assertEquals(listOf("ADL"), parsedCollab2.primaryArtists)
+        assertEquals(listOf("Haikaiss"), parsedCollab2.featuredArtists)
+
+        val parsedDuo = com.example.core.metadata.MusicSearchEngine.parseTrackArtists(namedDuo)
+        assertFalse(parsedDuo.isCollaboration)
+        assertEquals(listOf("Simon & Garfunkel"), parsedDuo.primaryArtists)
+
+        assertTrue(com.example.core.metadata.MusicSearchEngine.matchesArtist(solo, "Haikaiss", includeCollaborations = false))
+        assertFalse(com.example.core.metadata.MusicSearchEngine.matchesArtist(collabArtistField, "Haikaiss", includeCollaborations = false))
+        assertTrue(com.example.core.metadata.MusicSearchEngine.matchesArtist(collabArtistField, "Haikaiss", includeCollaborations = true))
+        assertTrue(com.example.core.metadata.MusicSearchEngine.matchesArtist(collabTitleField, "Haikaiss", includeCollaborations = true))
+    }
+
+    @Test
+    fun `music search engine ranks exact artist above collab, title, album, and genre without folder pollution`() {
+        val exactArtist = MusicTrack(
+            id = 1L, mediaStoreId = 1L, title = "Ouroboros", artist = "Haikaiss", album = "Teto Baixo",
+            albumId = 1L, artistId = 1L, durationMs = 200_000L, sizeBytes = 1000L,
+            filePath = "/music/a.mp3", folderPath = "/music", contentUri = "content://1", genre = "Rap",
+        )
+        val collabTrack = exactArtist.copy(
+            id = 2L, mediaStoreId = 2L, title = "Noite Fria", artist = "CortesiaDaCasa feat. Haikaiss",
+        )
+        val unrelatedSameFolder = exactArtist.copy(
+            id = 3L, mediaStoreId = 3L, title = "Morgana", artist = "Kamaitachi", album = "Contos",
+            filePath = "/music/haikaiss_mix/morgana.mp3", folderPath = "/music/haikaiss_mix", genre = "Rap",
+        )
+        val unrelatedSameGenre = exactArtist.copy(
+            id = 4L, mediaStoreId = 4L, title = "Plutão", artist = "VMZ", album = "Espaço",
+            filePath = "/music/vmz.mp3", folderPath = "/music", genre = "Rap",
+        )
+
+        val result = com.example.core.metadata.MusicSearchEngine.searchTracks(
+            tracks = listOf(unrelatedSameGenre, collabTrack, unrelatedSameFolder, exactArtist),
+            query = "  haïkaíss ",
+            filterMode = com.example.domain.models.SearchFilterMode.ALL,
+        )
+
+        assertEquals(listOf(1L, 2L), result.hits.map { it.track.id })
+        assertEquals(com.example.domain.models.SearchMatchSource.EXACT_ARTIST, result.hits[0].matchSource)
+        assertEquals(com.example.domain.models.SearchMatchSource.COLLAB_ARTIST, result.hits[1].matchSource)
+    }
 }

@@ -114,6 +114,9 @@ fun PlaylistEntity.toDomain(
     totalDurationMs = totalDurationMs,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    artistFilterName = artistFilterName,
+    autoUpdateByArtist = autoUpdateByArtist,
+    includeCollaborations = includeCollaborations,
 )
 
 fun PlaybackQueueEntity.toDomain(trackCount: Int = 0): PlaybackQueue = PlaybackQueue(

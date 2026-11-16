@@ -111,9 +111,13 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.R
 import com.example.core.common.TimeFormatter
+import com.example.core.metadata.MusicSearchEngine
 import com.example.domain.models.AnimationMode
 import com.example.domain.models.MusicTrack
 import com.example.domain.models.Playlist
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Switch
 
 /**
  * Official MYATO MUSIC brand emblem (delegates to MyatoOfficialSymbol for invariant brand identity).
@@ -265,10 +269,15 @@ fun CompactTrackRow(
     onLongClick: () -> Unit = {},
     onMoreClick: () -> Unit,
     onQuickAddToPlaylist: (() -> Unit)? = null,
+    badgeText: String? = null,
+    onFixUnknownArtist: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalMyatoColors.current
     val motion = LocalMotionSettings.current
+    val displayArtist = remember(track.artist) { MusicSearchEngine.sanitizeArtistName(track.artist) }
+    val isUnknown = remember(track.artist) { MusicSearchEngine.isUnknownArtist(track.artist) }
+
     val targetBg = when {
         isSelected -> colors.primary.copy(alpha = 0.16f)
         isCurrent -> colors.primary.copy(alpha = 0.10f)
@@ -337,9 +346,9 @@ fun CompactTrackRow(
             Spacer(Modifier.height(2.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "${track.artist} • ${track.album}",
+                    text = "$displayArtist • ${track.album}",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = colors.textSecondary,
+                    color = if (isUnknown) colors.secondary else colors.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
@@ -355,6 +364,36 @@ fun CompactTrackRow(
                         color = if (track.isPlayable) colors.primary else MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
                     )
+                }
+                if (!badgeText.isNullOrBlank()) {
+                    Spacer(Modifier.width(4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = colors.primary.copy(alpha = 0.16f),
+                    ) {
+                        Text(
+                            text = badgeText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.primary,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                        )
+                    }
+                }
+                if (isUnknown && onFixUnknownArtist != null) {
+                    Spacer(Modifier.width(4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = colors.secondary.copy(alpha = 0.22f),
+                        modifier = Modifier.clickable(onClick = onFixUnknownArtist),
+                    ) {
+                        Text(
+                            text = "Corrigir",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.secondary,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                        )
+                    }
                 }
             }
         }
@@ -760,6 +799,176 @@ fun CreatePlaylistDialog(
                 },
             ) {
                 Text("Criar Playlist", color = colors.primary, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar", color = colors.textSecondary)
+            }
+        },
+    )
+}
+
+@Composable
+fun CreateArtistPlaylistDialog(
+    artistName: String,
+    allTracks: List<MusicTrack>,
+    initialIncludeCollaborations: Boolean = false,
+    onDismiss: () -> Unit,
+    onConfirm: (playlistName: String, includeCollaborations: Boolean, autoUpdateEnabled: Boolean) -> Unit,
+) {
+    val colors = LocalMyatoColors.current
+    var playlistName by remember(artistName) { mutableStateOf(artistName) }
+    var includeCollabs by remember(artistName, initialIncludeCollaborations) {
+        mutableStateOf(initialIncludeCollaborations)
+    }
+    var autoUpdate by remember(artistName) { mutableStateOf(true) }
+
+    val matchingTracks = remember(allTracks, artistName, includeCollabs) {
+        MusicSearchEngine.tracksForArtist(allTracks, artistName, includeCollabs)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = colors.card,
+        titleContentColor = colors.textPrimary,
+        textContentColor = colors.textPrimary,
+        title = {
+            Column {
+                Text(
+                    text = "Criar playlist de $artistName",
+                    fontWeight = FontWeight.Bold,
+                    color = colors.textPrimary,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "${matchingTracks.size} música(s) identificada(s) nos metadados",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.primary,
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedTextField(
+                    value = playlistName,
+                    onValueChange = { playlistName = it },
+                    label = { Text("Nome da playlist") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("artist_playlist_name_input"),
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { includeCollabs = !includeCollabs },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = "Incluir colaborações",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "Inclui participações (feat., part., &) de $artistName.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary,
+                        )
+                    }
+                    Switch(
+                        checked = includeCollabs,
+                        onCheckedChange = { includeCollabs = it },
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { autoUpdate = !autoUpdate },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = "Atualizar automaticamente",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "Adiciona novas músicas de $artistName quando chegarem à biblioteca.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary,
+                        )
+                    }
+                    Switch(
+                        checked = autoUpdate,
+                        onCheckedChange = { autoUpdate = it },
+                    )
+                }
+
+                if (matchingTracks.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = colors.altBackground,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "Prévia das faixas incluídas:",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.primary,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            matchingTracks.take(4).forEach { track ->
+                                Text(
+                                    text = "• ${track.title} — ${MusicSearchEngine.sanitizeArtistName(track.artist)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colors.textSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (matchingTracks.size > 4) {
+                                Text(
+                                    text = "+ ${matchingTracks.size - 4} outra(s) música(s)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.primary,
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "Nenhuma música deste artista está disponível na biblioteca no momento.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.secondary,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val clean = playlistName.trim().ifBlank { artistName }
+                    onConfirm(clean, includeCollabs, autoUpdate)
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                modifier = Modifier.testTag("confirm_create_artist_playlist_button"),
+            ) {
+                Text("Criar (${matchingTracks.size})", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {

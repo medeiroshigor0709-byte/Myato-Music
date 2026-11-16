@@ -12,6 +12,7 @@ import com.example.core.database.AlbumEntity
 import com.example.core.database.ArtistEntity
 import com.example.core.database.MusicTrackEntity
 import com.example.core.database.MyatoDatabase
+import com.example.core.metadata.MusicSearchEngine
 import com.example.domain.models.AudioFormatCapability
 import com.example.domain.models.MusicTrack
 import kotlinx.coroutines.Dispatchers
@@ -112,8 +113,7 @@ class MediaStoreScanner(
                         val title = cursor.getString(titleCol)?.takeIf { it.isNotBlank() }
                             ?: File(filePath).nameWithoutExtension
                             ?: "Faixa desconhecida"
-                        val artist = cursor.getString(artistCol)?.takeIf { it.isNotBlank() && it != "<unknown>" }
-                            ?: "Artista desconhecido"
+                        val artist = MusicSearchEngine.sanitizeArtistName(cursor.getString(artistCol))
                         val artistId = cursor.getLong(artistIdCol)
                         val album = cursor.getString(albumCol)?.takeIf { it.isNotBlank() }
                             ?: "Álbum desconhecido"
@@ -238,7 +238,8 @@ class MediaStoreScanner(
 
                 val retriever = MediaMetadataRetriever()
                 var title = name.substringBeforeLast('.')
-                var artist = "Artista desconhecido"
+                var artist = MusicSearchEngine.UNKNOWN_ARTIST_LABEL
+                var albumArtist = ""
                 var album = dir.name ?: "Pasta SAF"
                 var duration = 0L
                 var bitrate = 0
@@ -247,7 +248,10 @@ class MediaStoreScanner(
                 try {
                     retriever.setDataSource(context, file.uri)
                     title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)?.takeIf { it.isNotBlank() } ?: title
-                    artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)?.takeIf { it.isNotBlank() } ?: artist
+                    artist = MusicSearchEngine.sanitizeArtistName(
+                        retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                    )
+                    albumArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST).orEmpty().trim()
                     album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() } ?: album
                     duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
                     bitrate = (retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull() ?: 0) / 1000
@@ -268,6 +272,7 @@ class MediaStoreScanner(
                         album = album,
                         albumId = album.hashCode().toLong(),
                         artistId = artist.hashCode().toLong(),
+                        albumArtist = albumArtist,
                         genre = genre,
                         year = year,
                         durationMs = duration,

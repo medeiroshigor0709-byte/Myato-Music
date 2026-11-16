@@ -16,6 +16,7 @@ import com.example.core.designsystem.AlbumArtPaletteExtractor
 import com.example.core.designsystem.AppFontCatalog
 import com.example.core.designsystem.BuiltInThemes
 import com.example.core.metadata.LrcLyricsEngine
+import com.example.core.metadata.MusicSearchEngine
 import com.example.core.metadata.TagEditPayload
 import com.example.core.storage.DuplicateGroup
 import com.example.core.storage.FileOperationResult
@@ -42,6 +43,8 @@ import com.example.domain.models.PlayerVisualBackgroundStyle
 import com.example.domain.models.Playlist
 import com.example.domain.models.PlaylistAddResult
 import com.example.domain.models.QueueOriginType
+import com.example.domain.models.SearchFilterMode
+import com.example.domain.models.SmartSearchResult
 import com.example.domain.models.SmartSelectionCriteria
 import com.example.domain.models.TrackSortOrder
 import com.example.widgets.WidgetUpdateHelper
@@ -50,6 +53,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -143,6 +147,19 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
     private val _previewedBackup = MutableStateFlow<Pair<BackupPreview, MyatoBackupBundle>?>(null)
     val previewedBackup: StateFlow<Pair<BackupPreview, MyatoBackupBundle>?> = _previewedBackup.asStateFlow()
 
+    init {
+        viewModelScope.launch {
+            app.database.trackDao().observeAllTracks()
+                .map { list -> list.map { Triple(it.id, it.artist, it.title) } }
+                .distinctUntilChanged()
+                .collect { snapshot ->
+                    if (snapshot.isNotEmpty()) {
+                        app.playlistRepository.syncAutoUpdateArtistPlaylists()
+                    }
+                }
+        }
+    }
+
     fun clearStatusMessage() {
         _statusMessage.value = null
     }
@@ -160,9 +177,14 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             _isScanning.value = true
             val res = app.libraryRepository.scanLibrary()
+            val synced = app.playlistRepository.syncAutoUpdateArtistPlaylists()
             _lastScanResult.value = res
             _isScanning.value = false
-            _statusMessage.value = "Biblioteca atualizada: ${res.tracksCount} músicas (${res.albumsCount} álbuns)."
+            _statusMessage.value = if (synced > 0) {
+                "Biblioteca atualizada: ${res.tracksCount} músicas • $synced nova(s) adicionada(s) às playlists automáticas."
+            } else {
+                "Biblioteca atualizada: ${res.tracksCount} músicas (${res.albumsCount} álbuns)."
+            }
         }
     }
 
@@ -170,8 +192,13 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             _isScanning.value = true
             val count = app.libraryRepository.importSafFolder(uri)
+            val synced = app.playlistRepository.syncAutoUpdateArtistPlaylists()
             _isScanning.value = false
-            _statusMessage.value = "$count música(s) importada(s) da pasta selecionada."
+            _statusMessage.value = if (synced > 0) {
+                "$count música(s) importada(s) e $synced adicionada(s) às playlists automáticas."
+            } else {
+                "$count música(s) importada(s) da pasta selecionada."
+            }
         }
     }
 
@@ -197,6 +224,20 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun sortTracks(list: List<MusicTrack>, sortOrder: TrackSortOrder, query: String): List<MusicTrack> =
         filterAndSortTracks(list, sortOrder, query)
+
+    fun smartSearchTracks(
+        list: List<MusicTrack>,
+        query: String,
+        filterMode: SearchFilterMode,
+        selectedArtist: String?,
+        sortOrder: TrackSortOrder,
+    ): SmartSearchResult = MusicSearchEngine.searchTracks(
+        tracks = list,
+        query = query,
+        filterMode = filterMode,
+        selectedArtist = selectedArtist,
+        sortOrder = sortOrder,
+    )
 
     // Playback & Multi-Queue
     fun playTracks(
@@ -268,6 +309,90 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             app.playlistRepository.createPlaylistWithTracks(name, trackIds, description)
             _statusMessage.value = "Playlist \"$name\" criada com ${trackIds.size} música(s)."
+        }
+    }
+
+    fun createArtistPlaylist(
+        artistName: String,
+        includeCollaborations: Boolean,
+        autoUpdateEnabled: Boolean,
+        customName: String? = null,
+    ) {
+        viewModelScope.launch {
+            val cleanArtist = artistName.trim()
+            val finalName = customName?.trim()?.ifBlank { cleanArtist } ?: cleanArtist
+            val pid = app.playlistRepository.createArtistPlaylist(
+                artistName = cleanArtist,
+                includeCollaborations = includeCollaborations,
+                autoUpdateEnabled = autoUpdateEnabled,
+                customName = finalName,
+            )
+            val addedCount = app.playlistRepository.getPlaylistTrackIdsSync(pid).size
+            _statusMessage.value = if (addedCount > 0) {
+                "Playlist \"$finalName\" criada com $addedCount música(s) de $cleanArtist."
+            } else {
+                "Playlist \"$finalName\" criada para $cleanArtist (nenhuma música encontrada ainda)."
+            }
+        }
+    }
+
+    fun updatePlaylistDetails(
+        playlistId: Long,
+        newName: String,
+        coverUri: String?,
+        autoUpdateEnabled: Boolean,
+        includeCollaborations: Boolean,
+    ) {
+        viewModelScope.launch {
+            app.playlistRepository.updatePlaylistDetails(
+                playlistId = playlistId,
+                newName = newName,
+                coverUri = coverUri,
+                autoUpdateEnabled = autoUpdateEnabled,
+                includeCollaborations = includeCollaborations,
+            )
+            _statusMessage.value = "Playlist atualizada."
+        }
+    }
+
+    fun updatePlaylistCoverFromPicker(playlistId: Long, imageUri: Uri) {
+        viewModelScope.launch {
+            val saved = app.playlistRepository.persistPlaylistCoverImage(playlistId, imageUri)
+            _statusMessage.value = if (saved != null) {
+                "Capa da playlist atualizada."
+            } else {
+                "Não foi possível salvar a imagem selecionada."
+            }
+        }
+    }
+
+    fun setPlaylistAutoUpdate(
+        playlistId: Long,
+        autoUpdateEnabled: Boolean,
+        includeCollaborations: Boolean,
+    ) {
+        viewModelScope.launch {
+            val added = app.playlistRepository.setPlaylistAutoUpdate(
+                playlistId = playlistId,
+                autoUpdateEnabled = autoUpdateEnabled,
+                includeCollaborations = includeCollaborations,
+            )
+            _statusMessage.value = when {
+                autoUpdateEnabled && added > 0 -> "Atualização automática ativada ($added nova(s) música(s) adicionada(s))."
+                autoUpdateEnabled -> "Atualização automática ativada para esta playlist."
+                else -> "Atualização automática desativada."
+            }
+        }
+    }
+
+    fun syncAutoUpdatePlaylists() {
+        viewModelScope.launch {
+            val added = app.playlistRepository.syncAutoUpdateArtistPlaylists()
+            _statusMessage.value = if (added > 0) {
+                "$added nova(s) música(s) adicionada(s) às playlists automáticas."
+            } else {
+                "Playlists automáticas já estão atualizadas."
+            }
         }
     }
 
@@ -571,6 +696,7 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
             }
+            app.playlistRepository.syncAutoUpdateArtistPlaylists()
             _statusMessage.value = if (isBatch) {
                 "${targetTracks.size} faixas atualizadas ($directCount gravadas diretamente no arquivo)."
             } else lastMsg

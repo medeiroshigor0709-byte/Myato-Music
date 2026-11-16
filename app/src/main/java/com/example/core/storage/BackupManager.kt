@@ -37,6 +37,9 @@ data class BackupPlaylistDto(
     val coverUri: String? = null,
     val isFavorite: Boolean = false,
     val lastUsedAt: Long = 0L,
+    val artistFilterName: String? = null,
+    val autoUpdateByArtist: Boolean = false,
+    val includeCollaborations: Boolean = false,
 )
 
 @Serializable
@@ -141,6 +144,9 @@ class BackupManager(
                     coverUri = p.coverUri,
                     isFavorite = p.isFavorite,
                     lastUsedAt = p.lastUsedAt,
+                    artistFilterName = p.artistFilterName,
+                    autoUpdateByArtist = p.autoUpdateByArtist,
+                    includeCollaborations = p.includeCollaborations,
                 )
             },
             queues = queues.map { q ->
@@ -264,6 +270,9 @@ class BackupManager(
                             isFavorite = p.isFavorite,
                             lastUsedAt = p.lastUsedAt,
                             createdAt = p.createdAt,
+                            artistFilterName = p.artistFilterName,
+                            autoUpdateByArtist = p.autoUpdateByArtist,
+                            includeCollaborations = p.includeCollaborations,
                         )
                     )
                     database.playlistDao().replacePlaylistOrder(newId, p.trackIds)
