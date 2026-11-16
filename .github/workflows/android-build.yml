@@ -5,8 +5,6 @@ on:
     branches:
       - main
       - master
-    tags:
-      - "v*"
   pull_request:
     branches:
       - main
@@ -301,21 +299,3 @@ jobs:
           name: MYATO-MUSIC-release-apk
           path: dist/MYATO-MUSIC-release.apk
           retention-days: 30
-
-      - name: Verify Signed Release APK Before Tag Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          if [ "${{ steps.release_build.outputs.has_release }}" != "true" ] || [ ! -f dist/MYATO-MUSIC-release.apk ]; then
-            echo "::error::Tag release aborted: signed MYATO-MUSIC-release.apk is required. Configure ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD in GitHub Secrets before pushing a version tag."
-            exit 1
-          fi
-
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') && steps.release_build.outputs.has_release == 'true'
-        uses: softprops/action-gh-release@v3
-        with:
-          name: MYATO MUSIC ${{ github.ref_name }}
-          generate_release_notes: true
-          files: |
-            dist/MYATO-MUSIC-release.apk
-            dist/MYATO-MUSIC-debug.apk

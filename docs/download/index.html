@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MYATO MUSIC — Download da Última Versão</title>
+  <style>
+    :root {
+      --bg: #000000;
+      --card: #1c1c1c;
+      --primary: #ff8500;
+      --text: #ffffff;
+      --muted: #a5a5a5;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: radial-gradient(circle at top, #1f1200 0%, var(--bg) 60%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 24px;
+    }
+    .card {
+      max-width: 480px;
+      width: 100%;
+      background: var(--card);
+      border: 1px solid rgba(255, 133, 0, 0.3);
+      border-radius: 20px;
+      padding: 28px;
+      text-align: center;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.5rem;
+      letter-spacing: 0.08em;
+    }
+    p {
+      color: var(--muted);
+      line-height: 1.5;
+      margin: 8px 0 20px;
+    }
+    .btn {
+      display: inline-block;
+      background: var(--primary);
+      color: #000000;
+      font-weight: 700;
+      text-decoration: none;
+      padding: 12px 22px;
+      border-radius: 12px;
+    }
+    .meta {
+      margin-top: 16px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>MYATO MUSIC</h1>
+    <p id="status">Localizando o APK da última versão estável no GitHub Releases...</p>
+    <a id="fallback-link" class="btn" href="https://github.com/medeiroshigor0709-byte/Myato-Player-v2/releases/latest">
+      Abrir Página de Releases
+    </a>
+    <div id="meta" class="meta"></div>
+  </main>
+
+  <script>
+    (async () => {
+      const apiUrl = "https://api.github.com/repos/medeiroshigor0709-byte/Myato-Player-v2/releases/latest";
+      const releasesUrl = "https://github.com/medeiroshigor0709-byte/Myato-Player-v2/releases/latest";
+      const statusEl = document.getElementById("status");
+      const metaEl = document.getElementById("meta");
+      const linkEl = document.getElementById("fallback-link");
+
+      try {
+        const res = await fetch(apiUrl, { headers: { Accept: "application/vnd.github+json" } });
+        if (!res.ok) {
+          statusEl.textContent = "Nenhuma Release pública encontrada ainda. Publique a primeira versão no GitHub Releases.";
+          return;
+        }
+        const release = await res.json();
+        const assets = Array.isArray(release.assets) ? release.assets : [];
+        const apk =
+          assets.find((a) => a.name === "MYATO-MUSIC.apk") ||
+          assets.find((a) => a.name === "MYATO-MUSIC-release.apk") ||
+          assets.find((a) => a.name && a.name.endsWith(".apk"));
+
+        if (!apk || !apk.browser_download_url) {
+          statusEl.textContent = `Release ${release.tag_name} encontrada, mas sem arquivo APK anexado.`;
+          linkEl.href = release.html_url || releasesUrl;
+          return;
+        }
+
+        const sizeMb = (apk.size / (1024 * 1024)).toFixed(2);
+        const date = release.published_at ? new Date(release.published_at).toLocaleDateString("pt-BR") : "";
+        statusEl.textContent = `Iniciando download direto de ${apk.name}...`;
+        metaEl.textContent = `Versão: ${release.tag_name} • ${sizeMb} MB${date ? ` • Publicado em ${date}` : ""}`;
+        linkEl.textContent = "⬇️ Baixar APK Agora";
+        linkEl.href = apk.browser_download_url;
+        window.location.replace(apk.browser_download_url);
+      } catch (err) {
+        statusEl.textContent = "Não foi possível consultar a API do GitHub. Use o botão abaixo para acessar as Releases.";
+        linkEl.href = releasesUrl;
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1530,8 +1530,8 @@ fun AddSongsToPlaylistDialog(
     ) {
         Surface(
             modifier = Modifier
-                .fillMaxWidth(0.94f)
-                .fillMaxHeight(0.88f)
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.94f)
                 .testTag("add_songs_dialog"),
             shape = RoundedCornerShape(24.dp),
             color = colors.card,
@@ -1541,7 +1541,7 @@ fun AddSongsToPlaylistDialog(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
                 Text(
                     text = if (showConfirmationStep) {
@@ -1561,7 +1561,7 @@ fun AddSongsToPlaylistDialog(
                     color = colors.primary,
                 )
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
 
                 if (showConfirmationStep) {
                     Text(
@@ -1629,69 +1629,72 @@ fun AddSongsToPlaylistDialog(
                         shape = RoundedCornerShape(12.dp),
                     )
 
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(6.dp))
 
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .testTag("add_songs_list"),
                     ) {
-                        items(SearchFilterMode.entries) { mode ->
-                            FilterChip(
-                                selected = filterMode == mode,
-                                onClick = { filterMode = mode },
-                                label = { Text(mode.label, maxLines = 1) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = colors.primary,
-                                    selectedLabelColor = Color.Black,
-                                ),
-                            )
+                        item(key = "filter_mode_chips") {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                items(SearchFilterMode.entries) { mode ->
+                                    FilterChip(
+                                        selected = filterMode == mode,
+                                        onClick = { filterMode = mode },
+                                        label = { Text(mode.label, maxLines = 1) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = colors.primary,
+                                            selectedLabelColor = Color.Black,
+                                        ),
+                                    )
+                                }
+                            }
                         }
-                    }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Permitir repetidas • ${filteredHits.size} música(s)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = colors.textSecondary,
-                            )
-                        }
-                        Switch(
-                            checked = allowDuplicates,
-                            onCheckedChange = { allowDuplicates = it },
-                        )
-                    }
-
-                    Spacer(Modifier.height(4.dp))
-
-                    if (filteredHits.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Rounded.SearchOff, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(36.dp))
-                                Spacer(Modifier.height(6.dp))
+                        item(key = "allow_duplicates_row") {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
                                 Text(
-                                    text = "Nenhuma música correspondente encontrada.",
+                                    text = "Permitir repetidas • ${filteredHits.size} música(s)",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = colors.textSecondary,
-                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Switch(
+                                    checked = allowDuplicates,
+                                    onCheckedChange = { allowDuplicates = it },
                                 )
                             }
                         }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .testTag("add_songs_list"),
-                        ) {
+
+                        if (filteredHits.isEmpty()) {
+                            item(key = "empty_search_results") {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 32.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(Icons.Rounded.SearchOff, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(36.dp))
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            text = "Nenhuma música correspondente encontrada.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colors.textSecondary,
+                                            textAlign = TextAlign.Center,
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
                             items(filteredHits, key = { it.track.id }) { hit ->
                                 val track = hit.track
                                 val alreadyInPlaylist = track.id in existingTrackIds
@@ -1771,7 +1774,7 @@ fun AddSongsToPlaylistDialog(
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(8.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),

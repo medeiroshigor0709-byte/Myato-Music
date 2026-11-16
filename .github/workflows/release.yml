@@ -1,0 +1,230 @@
+name: Release MYATO MUSIC APK
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag da versão para publicar (ex: v1.0.0)"
+        required: true
+        type: string
+      prerelease:
+        description: "Marcar como pré-lançamento?"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Test, Sign & Publish MYATO MUSIC Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          cmdline-tools-version: "14742923"
+          accept-android-sdk-licenses: true
+          packages: ""
+
+      - name: Configure Android SDK & Install Components
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
+            echo "::error::ANDROID_HOME / ANDROID_SDK_ROOT not found."
+            exit 1
+          fi
+          export ANDROID_HOME="$SDK_ROOT"
+          export ANDROID_SDK_ROOT="$SDK_ROOT"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/build-tools/36.0.0" >> "$GITHUB_PATH"
+
+          python3 -c 'print("y\n" * 50, end="")' | sdkmanager --licenses >/dev/null
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Prepare Gradle Wrapper & debug.keystore
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          if [ ! -f debug.keystore ]; then
+            if [ -f debug.keystore.base64 ]; then
+              python3 -c '
+          import base64
+          with open("debug.keystore.base64", "r", encoding="utf-8") as src:
+              raw = "".join(src.read().split())
+          with open("debug.keystore", "wb") as dst:
+              dst.write(base64.b64decode(raw))
+          '
+            else
+              keytool -genkeypair -v \
+                -keystore debug.keystore \
+                -storepass android \
+                -alias androiddebugkey \
+                -keypass android \
+                -keyalg RSA \
+                -keysize 2048 \
+                -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
+            fi
+          fi
+
+      - name: Run Unit & Robolectric Tests
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Build & Verify Debug APK
+        run: |
+          set -euo pipefail
+          ./gradlew assembleDebug --no-daemon
+          mkdir -p dist
+          DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$DEBUG_APK" ]; then
+            echo "::error::Debug APK missing at $DEBUG_APK"
+            exit 1
+          fi
+          cp "$DEBUG_APK" dist/MYATO-MUSIC-debug.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose dist/MYATO-MUSIC-debug.apk
+
+      - name: Build & Sign Release APK
+        id: release_build
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ORIG_KS="/tmp/myato-release-orig.jks"
+          GRADLE_KS="/tmp/myato-release-gradle.jks"
+          cleanup() {
+            rm -f "$ORIG_KS" "$GRADLE_KS"
+          }
+          trap cleanup EXIT
+
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ] || \
+             [ -z "${ANDROID_KEYSTORE_PASSWORD:-}" ] || \
+             [ -z "${ANDROID_KEY_ALIAS:-}" ] || \
+             [ -z "${ANDROID_KEY_PASSWORD:-}" ]; then
+            echo "::error::Release signing secrets are required (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD)."
+            exit 1
+          fi
+
+          python3 - "$ORIG_KS" << 'PYEOF'
+          import base64, os, sys
+          raw = "".join(os.environ["ANDROID_KEYSTORE_BASE64"].split())
+          with open(sys.argv[1], "wb") as f:
+              f.write(base64.b64decode(raw))
+          PYEOF
+          cp "$ORIG_KS" "$GRADLE_KS"
+
+          if ! keytool -list \
+            -alias upload \
+            -keystore "$GRADLE_KS" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null 2>&1; then
+            keytool -changealias \
+              -alias "$ANDROID_KEY_ALIAS" \
+              -destalias "upload" \
+              -keystore "$GRADLE_KS" \
+              -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+              -keypass "$ANDROID_KEY_PASSWORD"
+          fi
+
+          KEYSTORE_PATH="$GRADLE_KS" \
+          STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD" \
+          KEY_PASSWORD="$ANDROID_KEY_PASSWORD" \
+          ./gradlew assembleRelease --no-daemon
+
+          RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$RELEASE_APK" ]; then
+            echo "::error::Release APK not found at $RELEASE_APK"
+            exit 1
+          fi
+
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          mkdir -p dist
+          cp "$RELEASE_APK" dist/MYATO-MUSIC-release.apk
+          "$APKSIGNER" sign \
+            --ks "$ORIG_KS" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass "env:ANDROID_KEYSTORE_PASSWORD" \
+            --key-pass "env:ANDROID_KEY_PASSWORD" \
+            dist/MYATO-MUSIC-release.apk
+
+          "$APKSIGNER" verify --verbose dist/MYATO-MUSIC-release.apk
+          cp dist/MYATO-MUSIC-release.apk dist/MYATO-MUSIC.apk
+
+          TAG_NAME="${{ github.event.inputs.release_tag || github.ref_name }}"
+          SIZE_BYTES=$(stat -c%s dist/MYATO-MUSIC.apk)
+          SIZE_MB=$(python3 -c "print(f'{${SIZE_BYTES} / (1024 * 1024):.2f} MB')")
+          PUB_DATE=$(date -u +"%d/%m/%Y")
+
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "apk_size=$SIZE_MB" >> "$GITHUB_OUTPUT"
+          echo "pub_date=$PUB_DATE" >> "$GITHUB_OUTPUT"
+
+      - name: Update README Release Metadata (if main branch is writable)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.release_build.outputs.tag_name }}"
+          SIZE="${{ steps.release_build.outputs.apk_size }}"
+          DATE="${{ steps.release_build.outputs.pub_date }}"
+          python3 - "$TAG" "$SIZE" "$DATE" << 'PYEOF'
+          import re, sys
+          tag, size, pub_date = sys.argv[1:4]
+          with open("README.md", "r", encoding="utf-8") as f:
+              content = f.read()
+          block = (
+              "<!-- RELEASE_INFO_START -->\n"
+              f"- **Versão disponível:** `{tag}`\n"
+              f"- **Arquivo:** `MYATO-MUSIC.apk` (`{size}`)\n"
+              f"- **Data da publicação:** `{pub_date}`\n"
+              "<!-- RELEASE_INFO_END -->"
+          )
+          updated = re.sub(
+              r"<!-- RELEASE_INFO_START -->.*?<!-- RELEASE_INFO_END -->",
+              block,
+              content,
+              flags=re.DOTALL,
+          )
+          with open("README.md", "w", encoding="utf-8") as f:
+              f.write(updated)
+          PYEOF
+          if ! git diff --quiet README.md; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add README.md
+            git commit -m "docs: update latest release info to ${{ steps.release_build.outputs.tag_name }} [skip ci]"
+            git push origin HEAD:main
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.release_build.outputs.tag_name }}
+          name: MYATO MUSIC ${{ steps.release_build.outputs.tag_name }}
+          prerelease: ${{ github.event.inputs.prerelease || false }}
+          generate_release_notes: true
+          files: |
+            dist/MYATO-MUSIC.apk
+            dist/MYATO-MUSIC-release.apk
+            dist/MYATO-MUSIC-debug.apk
