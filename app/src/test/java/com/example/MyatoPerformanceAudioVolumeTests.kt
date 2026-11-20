@@ -16,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ApplicationProvider
@@ -248,9 +249,11 @@ class MyatoPerformanceAudioVolumeTests {
 
         // Clearing search resets debouncedQuery immediately without waiting 300ms and delivers full library from background thread
         composeRule.onNodeWithTag("clear_search_button").performClick()
+        composeRule.mainClock.advanceTimeBy(350L)
         composeRule.waitUntil(timeoutMillis = 3_000L) {
-            composeRule.onAllNodes(hasText("Plutão")).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodes(hasTestTag("search_result_count")).fetchSemanticsNodes().isEmpty()
         }
+        composeRule.onNodeWithTag("all_songs_list").performScrollToNode(hasText("Plutão"))
         composeRule.onNodeWithText("Plutão").assertIsDisplayed()
     }
 
@@ -318,8 +321,14 @@ class MyatoPerformanceAudioVolumeTests {
 
         // Digital silence FFT must yield all zeros and hasRealSignal = false
         val zeroFft = ByteArray(1024)
+        val freshAnalyzer = AudioSpectrumAnalyzer()
+        val initialSilenceFrame = freshAnalyzer.processFftCapture(zeroFft, 48_000_000, status = VisualizerCaptureStatus.ACTIVE_SYNCED)
+        assertFalse(initialSilenceFrame.hasRealSignal)
+        assertTrue(initialSilenceFrame.bars.all { it == 0f })
+
+        // When trailing silence follows a loud signal, bars decay exponentially to zero
         var silenceFrame = AudioVisualizerFrame.Empty
-        repeat(8) {
+        repeat(20) {
             silenceFrame = loudAnalyzer.processFftCapture(zeroFft, 48_000_000, status = VisualizerCaptureStatus.ACTIVE_SYNCED)
         }
         assertFalse(silenceFrame.hasRealSignal)

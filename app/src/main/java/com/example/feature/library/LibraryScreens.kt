@@ -820,7 +820,8 @@ fun AllSongsScreen(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .weight(1f),
+                        .weight(1f)
+                        .testTag("all_songs_list"),
                     contentPadding = PaddingValues(bottom = if (isSelectionMode) 180.dp else 140.dp),
                 ) {
                     itemsIndexed(
