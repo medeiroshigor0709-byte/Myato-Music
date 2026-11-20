@@ -145,6 +145,7 @@ fun MyatoRootApp(
     val eqPresets by viewModel.equalizerPresets.collectAsStateWithLifecycle()
     val spectrumBars by viewModel.spectrumBars.collectAsStateWithLifecycle()
     val hasRealFftSignal by viewModel.hasRealFftSignal.collectAsStateWithLifecycle()
+    val visualizerFrame by viewModel.visualizerFrame.collectAsStateWithLifecycle()
     val sleepTimerState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
     val statsSummary by viewModel.statsSummary.collectAsStateWithLifecycle()
     val backupHistory by viewModel.backupHistory.collectAsStateWithLifecycle()
@@ -542,6 +543,7 @@ fun MyatoRootApp(
                                     onCreateArtistPlaylist = { artist, collabs, autoUpdate, customName ->
                                         viewModel.createArtistPlaylist(artist, collabs, autoUpdate, customName)
                                     },
+                                    searchDebounceMs = preferences.searchDebounceMs,
                                 )
                             }
 
@@ -733,6 +735,11 @@ fun MyatoRootApp(
                                     onSetReduceMotion = { viewModel.setReduceMotion(it) },
                                     onSetReduceEffectsOnLowBattery = { viewModel.setReduceEffectsOnLowBattery(it) },
                                     progressPositionFlow = viewModel.playbackProgressMs,
+                                    visualizerFrame = visualizerFrame,
+                                    onVolumeDragStarted = { viewModel.playbackController.onVolumeDragStarted() },
+                                    onVolumeDragFinished = { viewModel.playbackController.onVolumeDragFinished() },
+                                    onToggleVolumeMute = { viewModel.playbackController.toggleVolumeMute() },
+                                    onRefreshVisualizerPermission = { viewModel.refreshVisualizerState() },
                                 )
                             }
 
@@ -1015,6 +1022,7 @@ fun MyatoRootApp(
                                     activeThemeName = activeTheme.name,
                                     onOpenMyatoThemes = { navController.navigate(MyatoRoute.ThemeCenter) },
                                     onSelectAnimationIntensity = { viewModel.setThemeAnimationIntensity(it) },
+                                    onSetSearchDebounceMs = { viewModel.setSearchDebounceMs(it) },
                                 )
                             }
 

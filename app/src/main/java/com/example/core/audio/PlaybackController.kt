@@ -1,9 +1,21 @@
 package com.example.core.audio
 
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.database.ContentObserver
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.provider.Settings
+import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -29,8 +41,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 data class PlaybackUiState(
     val activeQueue: PlaybackQueue? = null,
@@ -43,6 +55,10 @@ data class PlaybackUiState(
     val isShuffleEnabled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.OFF,
     val volumeFraction: Float = 1f,
+    val volumeStep: Int = 15,
+    val volumeMinStep: Int = 0,
+    val volumeMaxStep: Int = 15,
+    val isVolumeMuted: Boolean = false,
     val errorMessage: String? = null,
 )
 
@@ -82,6 +98,14 @@ class PlaybackController(private val context: Context) {
     private var isAppInForeground: Boolean = true
     @Volatile
     private var lastPersistedClockMs: Long = 0L
+    @Volatile
+    private var isUserDraggingVolume: Boolean = false
+    @Volatile
+    private var lastInternalVolumeWriteMs: Long = 0L
+    @Volatile
+    private var lastInternalVolumeStep: Int = -1
+    @Volatile
+    private var volumeBeforeMuteStep: Int = -1
 
     private val _playbackState = MutableStateFlow(PlaybackUiState())
     val playbackState: StateFlow<PlaybackUiState> = _playbackState.asStateFlow()
@@ -89,13 +113,80 @@ class PlaybackController(private val context: Context) {
     private val _progressPositionMs = MutableStateFlow(0L)
     val progressPositionMs: StateFlow<Long> = _progressPositionMs.asStateFlow()
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val volumeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context?, intent: Intent?) {
+            val action = intent?.action ?: return
+            when (action) {
+                ACTION_VOLUME_CHANGED, ACTION_STREAM_MUTE_CHANGED -> {
+                    val streamType = intent.getIntExtra(EXTRA_VOLUME_STREAM_TYPE, AudioManager.STREAM_MUSIC)
+                    if (streamType == AudioManager.STREAM_MUSIC) {
+                        syncVolumeFromDevice()
+                    }
+                }
+                AudioManager.ACTION_AUDIO_BECOMING_NOISY -> {
+                    syncVolumeFromDevice(force = true)
+                }
+            }
+        }
+    }
+
+    private val volumeContentObserver = object : ContentObserver(mainHandler) {
+        override fun onChange(selfChange: Boolean, uri: Uri?) {
+            syncVolumeFromDevice()
+        }
+    }
+
+    private val volumeDeviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+            syncVolumeFromDevice(force = true)
+        }
+
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+            syncVolumeFromDevice(force = true)
+        }
+    }
+
     init {
+        registerVolumeObservers()
+        syncVolumeFromDevice(force = true)
         restoreLastActiveQueue()
+    }
+
+    companion object {
+        const val ACTION_VOLUME_CHANGED = "android.media.VOLUME_CHANGED_ACTION"
+        const val ACTION_STREAM_MUTE_CHANGED = "android.media.STREAM_MUTE_CHANGED_ACTION"
+        const val EXTRA_VOLUME_STREAM_TYPE = "android.media.EXTRA_VOLUME_STREAM_TYPE"
+    }
+
+    private fun registerVolumeObservers() {
+        runCatching {
+            val filter = IntentFilter().apply {
+                addAction(ACTION_VOLUME_CHANGED)
+                addAction(ACTION_STREAM_MUTE_CHANGED)
+                addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+            }
+            ContextCompat.registerReceiver(context, volumeReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
+        }
+        runCatching {
+            context.contentResolver.registerContentObserver(
+                Settings.System.CONTENT_URI,
+                true,
+                volumeContentObserver,
+            )
+        }
+        runCatching {
+            audioManager.registerAudioDeviceCallback(volumeDeviceCallback, mainHandler)
+        }
     }
 
     fun setAppForeground(inForeground: Boolean) {
         if (isAppInForeground == inForeground) return
         isAppInForeground = inForeground
+        if (inForeground) {
+            syncVolumeFromDevice(force = true)
+        }
         val controller = mediaController ?: return
         if (controller.isPlaying) {
             if (inForeground) {
@@ -114,8 +205,12 @@ class PlaybackController(private val context: Context) {
             val controller = runCatching { future.get() }.getOrNull() ?: return@addListener
             mediaController = controller
             attachPlayerListener(controller)
-            syncVolumeFromDevice()
+            syncVolumeFromDevice(force = true)
             refreshProgressTicker(controller.isPlaying)
+            equalizerEngine.onPlaybackStateChanged(
+                isPlaying = controller.isPlaying,
+                hasTrack = _playbackState.value.currentTrack != null,
+            )
             // Load existing queue into ExoPlayer if player has no items yet
             val state = _playbackState.value
             if (controller.mediaItemCount == 0 && state.queueTracks.isNotEmpty()) {
@@ -144,6 +239,11 @@ class PlaybackController(private val context: Context) {
                     isPlaying = isPlaying,
                     positionMs = pos,
                 )
+                equalizerEngine.onPlaybackStateChanged(
+                    isPlaying = isPlaying,
+                    hasTrack = _playbackState.value.currentTrack != null,
+                )
+                syncVolumeFromDevice(force = true)
                 refreshProgressTicker(isPlaying)
                 persistCurrentQueuePosition()
                 pushWidgetUpdate()
@@ -169,12 +269,22 @@ class PlaybackController(private val context: Context) {
                     positionMs = 0L,
                     errorMessage = null,
                 )
+                equalizerEngine.onPlaybackStateChanged(
+                    isPlaying = controller.isPlaying,
+                    hasTrack = track != null,
+                )
+                equalizerEngine.onTrackTransitioned()
+                syncVolumeFromDevice(force = true)
                 persistCurrentQueuePosition()
                 pushWidgetUpdate()
             }
 
             override fun onPlayerError(error: PlaybackException) {
                 refreshProgressTicker(false)
+                equalizerEngine.onPlaybackStateChanged(
+                    isPlaying = false,
+                    hasTrack = _playbackState.value.currentTrack != null,
+                )
                 _playbackState.value = _playbackState.value.copy(
                     isPlaying = false,
                     errorMessage = "Não foi possível reproduzir este arquivo (${error.errorCodeName}). Verifique se o arquivo existe ou se o formato é suportado.",
@@ -308,6 +418,8 @@ class PlaybackController(private val context: Context) {
             )
             if (orderedTracks.isNotEmpty()) {
                 loadTracksIntoController(orderedTracks, idx, queue.currentPositionMs, autoPlay = autoPlay)
+            } else {
+                equalizerEngine.onPlaybackStateChanged(isPlaying = false, hasTrack = false)
             }
             pushWidgetUpdate()
         }
@@ -338,6 +450,9 @@ class PlaybackController(private val context: Context) {
                 )
                 .build()
         }
+        equalizerEngine.onPlaybackStateChanged(isPlaying = autoPlay, hasTrack = tracks.isNotEmpty())
+        equalizerEngine.onTrackTransitioned()
+        syncVolumeFromDevice(force = true)
         controller.setMediaItems(mediaItems, startIndex.coerceIn(0, mediaItems.lastIndex), startPositionMs.coerceAtLeast(0L))
         controller.prepare()
         applyShuffleAndRepeatToController(controller)
@@ -424,19 +539,95 @@ class PlaybackController(private val context: Context) {
         updateQueueFlags(shuffle = _playbackState.value.isShuffleEnabled, repeatMode = next)
     }
 
-    fun setVolumeFraction(fraction: Float) {
-        val clamped = fraction.coerceIn(0f, 1f)
-        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        val target = (maxVol * clamped).toInt().coerceIn(0, maxVol)
-        runCatching { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0) }
-        mediaController?.volume = 1f
-        _playbackState.value = _playbackState.value.copy(volumeFraction = clamped)
+    private fun readStreamVolumeBounds(): Pair<Int, Int> {
+        val minVol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            runCatching { audioManager.getStreamMinVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(0)
+        } else {
+            0
+        }
+        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(minVol + 1)
+        return minVol to maxVol
     }
 
-    fun syncVolumeFromDevice() {
-        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-        val curr = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        _playbackState.value = _playbackState.value.copy(volumeFraction = curr.toFloat() / maxVol.toFloat())
+    fun onVolumeDragStarted() {
+        isUserDraggingVolume = true
+    }
+
+    fun onVolumeDragFinished() {
+        isUserDraggingVolume = false
+        syncVolumeFromDevice(force = true)
+    }
+
+    fun setVolumeFraction(fraction: Float) {
+        val clamped = fraction.coerceIn(0f, 1f)
+        val (minVol, maxVol) = readStreamVolumeBounds()
+        val span = (maxVol - minVol).coerceAtLeast(1)
+        val target = (minVol + (span * clamped).roundToInt()).coerceIn(minVol, maxVol)
+        val currentSystemVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        if (target != currentSystemVol || (target == minVol && audioManager.isStreamMute(AudioManager.STREAM_MUSIC).not())) {
+            lastInternalVolumeWriteMs = SystemClock.elapsedRealtime()
+            lastInternalVolumeStep = target
+            runCatching { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0) }
+        }
+        if (target > minVol) {
+            volumeBeforeMuteStep = target
+        }
+        mediaController?.volume = 1f
+        _playbackState.value = _playbackState.value.copy(
+            volumeFraction = clamped,
+            volumeStep = target,
+            volumeMinStep = minVol,
+            volumeMaxStep = maxVol,
+            isVolumeMuted = target <= minVol,
+        )
+    }
+
+    fun toggleVolumeMute() {
+        val (minVol, maxVol) = readStreamVolumeBounds()
+        val curr = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).coerceIn(minVol, maxVol)
+        val isMutedNow = audioManager.isStreamMute(AudioManager.STREAM_MUSIC) || curr <= minVol
+        val targetStep = if (isMutedNow) {
+            volumeBeforeMuteStep.takeIf { it > minVol } ?: ((minVol + maxVol) / 2).coerceAtLeast(minVol + 1)
+        } else {
+            volumeBeforeMuteStep = curr
+            minVol
+        }
+        lastInternalVolumeWriteMs = SystemClock.elapsedRealtime()
+        lastInternalVolumeStep = targetStep
+        runCatching { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetStep, 0) }
+        syncVolumeFromDevice(force = true)
+    }
+
+    fun adjustVolumeByStep(delta: Int) {
+        val (minVol, maxVol) = readStreamVolumeBounds()
+        val curr = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).coerceIn(minVol, maxVol)
+        val target = (curr + delta).coerceIn(minVol, maxVol)
+        lastInternalVolumeWriteMs = SystemClock.elapsedRealtime()
+        lastInternalVolumeStep = target
+        runCatching { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0) }
+        syncVolumeFromDevice(force = true)
+    }
+
+    fun syncVolumeFromDevice(force: Boolean = false) {
+        val (minVol, maxVol) = readStreamVolumeBounds()
+        val span = (maxVol - minVol).coerceAtLeast(1)
+        val curr = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).coerceIn(minVol, maxVol)
+        val isMuted = runCatching { audioManager.isStreamMute(AudioManager.STREAM_MUSIC) }.getOrDefault(false) || curr <= minVol
+        val nowMs = SystemClock.elapsedRealtime()
+        if (!force && isUserDraggingVolume && (nowMs - lastInternalVolumeWriteMs) < 220L && curr == lastInternalVolumeStep) {
+            return
+        }
+        val fraction = if (isMuted) 0f else ((curr - minVol).toFloat() / span.toFloat()).coerceIn(0f, 1f)
+        if (curr > minVol) {
+            volumeBeforeMuteStep = curr
+        }
+        _playbackState.value = _playbackState.value.copy(
+            volumeFraction = fraction,
+            volumeStep = curr,
+            volumeMinStep = minVol,
+            volumeMaxStep = maxVol,
+            isVolumeMuted = isMuted,
+        )
     }
 
     fun addTrackNextInActiveQueue(track: MusicTrack) {
@@ -478,6 +669,7 @@ class PlaybackController(private val context: Context) {
             launch(Dispatchers.Main) {
                 mediaController?.clearMediaItems()
                 refreshProgressTicker(false)
+                equalizerEngine.onPlaybackStateChanged(isPlaying = false, hasTrack = false)
                 _progressPositionMs.value = 0L
                 _playbackState.value = _playbackState.value.copy(
                     queueTracks = emptyList(),
@@ -700,5 +892,19 @@ class PlaybackController(private val context: Context) {
                 progressPercent = progressPercent,
             )
         }
+    }
+
+    fun release() {
+        progressJob?.cancel()
+        progressJob = null
+        runCatching { context.unregisterReceiver(volumeReceiver) }
+        runCatching { context.contentResolver.unregisterContentObserver(volumeContentObserver) }
+        runCatching { audioManager.unregisterAudioDeviceCallback(volumeDeviceCallback) }
+        equalizerEngine.releaseAll()
+        controllerFuture?.let { future ->
+            runCatching { MediaController.releaseFuture(future) }
+        }
+        controllerFuture = null
+        mediaController = null
     }
 }

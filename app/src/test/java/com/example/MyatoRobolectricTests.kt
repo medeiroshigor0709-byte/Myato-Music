@@ -1124,7 +1124,10 @@ class MyatoRobolectricTests {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithTag("songs_search_input").performTextInput("Haikaiss")
-        composeRule.waitForIdle()
+        composeRule.mainClock.advanceTimeBy(350L)
+        composeRule.waitUntil(timeoutMillis = 3_000L) {
+            composeRule.onAllNodes(hasTestTag("search_result_count")).fetchSemanticsNodes().isNotEmpty()
+        }
 
         composeRule.onNodeWithTag("search_result_count").assertIsDisplayed()
         composeRule.onNodeWithText("1 música(s) encontrada(s)").assertIsDisplayed()
@@ -1139,7 +1142,10 @@ class MyatoRobolectricTests {
         // Clear search and test empty state on non-matching query
         composeRule.onNodeWithTag("clear_search_button").performClick()
         composeRule.onNodeWithTag("songs_search_input").performTextInput("ArtistaInexistenteXYZ")
-        composeRule.waitForIdle()
+        composeRule.mainClock.advanceTimeBy(350L)
+        composeRule.waitUntil(timeoutMillis = 3_000L) {
+            composeRule.onAllNodes(hasTestTag("search_empty_state")).fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithTag("search_empty_state").assertIsDisplayed()
     }
 

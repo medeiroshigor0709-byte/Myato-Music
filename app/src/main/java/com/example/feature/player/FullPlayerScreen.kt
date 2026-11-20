@@ -1,5 +1,8 @@
 package com.example.feature.player
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -33,6 +36,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.VolumeDown
+import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.BookmarkAdd
@@ -92,6 +97,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.core.audio.AudioVisualizerFrame
 import com.example.core.audio.PlaybackUiState
 import com.example.core.common.TimeFormatter
 import com.example.core.designsystem.AlbumArtwork
@@ -110,6 +116,7 @@ import com.example.domain.models.PlayerAppearance
 import com.example.domain.models.PlayerVisualBackgroundStyle
 import com.example.domain.models.RepeatMode as MyatoRepeatMode
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.math.roundToInt
 
 /**
  * 13. Full Player Screen — Cinematic artwork, dynamic ambient backdrop, interactive progress,
@@ -180,6 +187,11 @@ fun FullPlayerScreen(
     onSetReduceMotion: (Boolean) -> Unit = {},
     onSetReduceEffectsOnLowBattery: (Boolean) -> Unit = {},
     progressPositionFlow: StateFlow<Long>? = null,
+    visualizerFrame: AudioVisualizerFrame? = null,
+    onVolumeDragStarted: () -> Unit = {},
+    onVolumeDragFinished: () -> Unit = {},
+    onToggleVolumeMute: () -> Unit = {},
+    onRefreshVisualizerPermission: () -> Unit = {},
 ) {
     val colors = LocalMyatoColors.current
     val motion = LocalMotionSettings.current
@@ -188,6 +200,11 @@ fun FullPlayerScreen(
     var showBookmarksSheet by remember { mutableStateOf(false) }
     var showNoteSheet by remember { mutableStateOf(false) }
     var showPlayerSettingsSheet by remember { mutableStateOf(false) }
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { _ ->
+        onRefreshVisualizerPermission()
+    }
 
     val duration = playbackState.durationMs.coerceAtLeast(1L)
 
@@ -405,22 +422,66 @@ fun FullPlayerScreen(
 
             Spacer(Modifier.height(14.dp))
 
-            // Volume Control
+            // Bidirectional Android System Media Volume Control (STREAM_MUSIC)
+            var isDraggingVolume by remember { mutableStateOf(false) }
+            var dragVolumeFraction by remember { mutableFloatStateOf(playbackState.volumeFraction) }
+            val shownVolume = if (isDraggingVolume) dragVolumeFraction else playbackState.volumeFraction
+            val shownMuted = if (isDraggingVolume) dragVolumeFraction <= 0.005f else (playbackState.isVolumeMuted || shownVolume <= 0.005f)
+            val volumeIcon = when {
+                shownMuted -> Icons.AutoMirrored.Rounded.VolumeOff
+                shownVolume < 0.5f -> Icons.AutoMirrored.Rounded.VolumeDown
+                else -> Icons.AutoMirrored.Rounded.VolumeUp
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = "Volume", tint = colors.textSecondary, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
+                IconButton(
+                    onClick = onToggleVolumeMute,
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("player_volume_mute_button"),
+                ) {
+                    Icon(
+                        imageVector = volumeIcon,
+                        contentDescription = if (shownMuted) "Ativar som" else "Silenciar mídia",
+                        tint = if (shownMuted) colors.textSecondary else colors.secondary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
                 Slider(
-                    value = playbackState.volumeFraction,
-                    onValueChange = onVolumeChange,
+                    value = shownVolume,
+                    onValueChange = { next ->
+                        if (!isDraggingVolume) {
+                            isDraggingVolume = true
+                            onVolumeDragStarted()
+                        }
+                        dragVolumeFraction = next
+                        onVolumeChange(next)
+                    },
+                    onValueChangeFinished = {
+                        isDraggingVolume = false
+                        onVolumeDragFinished()
+                    },
                     colors = SliderDefaults.colors(
                         thumbColor = colors.secondary,
                         activeTrackColor = colors.secondary,
                         inactiveTrackColor = colors.card,
                     ),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("player_volume_slider"),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "${(shownVolume * 100f).roundToInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .width(42.dp)
+                        .testTag("player_volume_percent"),
+                    textAlign = TextAlign.End,
                 )
             }
 
@@ -447,7 +508,7 @@ fun FullPlayerScreen(
             // NOVA ÁREA INFERIOR — PAINEL COMPLETO FIXO
             // =========================================================================
 
-            // 1. VISUALIZADOR DE ÁUDIO ANIMADO (Graves, Médios, Agudos, adaptativo ao volume)
+            // 1. REAL AUDIO-SYNCHRONIZED VISUALIZER (Graves, Médios, Agudos + Detecção de Batida)
             if (visualizerEnabled) {
                 AnimatedAudioVisualizerSection(
                     spectrumBars = spectrumBars,
@@ -456,6 +517,10 @@ fun FullPlayerScreen(
                     intensity = animationIntensity,
                     volumeFraction = playbackState.volumeFraction,
                     onOpenSettings = { showPlayerSettingsSheet = true },
+                    visualizerFrame = visualizerFrame,
+                    onRequestAudioPermission = {
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    },
                 )
                 Spacer(Modifier.height(10.dp))
             }

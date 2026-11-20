@@ -71,6 +71,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -80,6 +81,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -108,6 +110,7 @@ import com.example.core.designsystem.StaggeredEntryContainer
 import com.example.core.metadata.MusicSearchEngine
 import com.example.core.storage.DuplicateGroup
 import com.example.domain.models.AlbumItem
+import com.example.domain.models.ArtistFilterCandidate
 import com.example.domain.models.ArtistItem
 import com.example.domain.models.FolderItem
 import com.example.domain.models.GenreItem
@@ -116,7 +119,11 @@ import com.example.domain.models.QueueOriginType
 import com.example.domain.models.SearchFilterMode
 import com.example.domain.models.SearchMatchSource
 import com.example.domain.models.SmartSelectionCriteria
+import com.example.domain.models.SmartSearchResult
 import com.example.domain.models.TrackSortOrder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 @Composable
 fun LibraryHubScreen(
@@ -232,9 +239,12 @@ fun AllSongsScreen(
     onSmartSelect: (SmartSelectionCriteria, MusicTrack?) -> List<Long>,
     sortTracks: (List<MusicTrack>, TrackSortOrder, String) -> List<MusicTrack>,
     onCreateArtistPlaylist: (artistName: String, includeCollaborations: Boolean, autoUpdateEnabled: Boolean, customName: String) -> Unit = { _, _, _, _ -> },
+    searchDebounceMs: Long = MusicSearchEngine.DEFAULT_SEARCH_DEBOUNCE_MS,
 ) {
     val colors = LocalMyatoColors.current
     var query by remember { mutableStateOf("") }
+    var debouncedQuery by remember { mutableStateOf("") }
+    var isSearching by remember { mutableStateOf(false) }
     var searchFilterMode by remember { mutableStateOf(SearchFilterMode.ALL) }
     var selectedArtistFilter by remember { mutableStateOf<String?>(null) }
     var sortOrder by remember { mutableStateOf(initialSortOrder) }
@@ -250,28 +260,54 @@ fun AllSongsScreen(
     val selectedIds = remember { mutableStateListOf<Long>() }
     val isSelectionMode by remember { derivedStateOf { selectedIds.isNotEmpty() } }
 
+    val clampedDebounceMs = remember(searchDebounceMs) {
+        if (searchDebounceMs <= 0L) 0L else MusicSearchEngine.clampDebounceMs(searchDebounceMs)
+    }
+
+    // Configurable debounce (250–350ms, default 280ms); clearing resets immediately without blocking typing
+    LaunchedEffect(query, clampedDebounceMs) {
+        if (query.isBlank() || clampedDebounceMs <= 0L) {
+            debouncedQuery = query
+        } else {
+            delay(clampedDebounceMs)
+            debouncedQuery = query
+        }
+    }
+
     val filteredByFormat = remember(tracks, formatFilter) {
         if (formatFilter == "Todos" || formatFilter == "Todas") tracks
         else tracks.filter { it.formatExtension.equals(formatFilter, ignoreCase = true) }
     }
 
-    val searchResult = remember(filteredByFormat, query, searchFilterMode, selectedArtistFilter, sortOrder) {
-        MusicSearchEngine.searchTracks(
-            tracks = filteredByFormat,
-            query = query,
-            filterMode = searchFilterMode,
-            selectedArtist = selectedArtistFilter,
-            sortOrder = sortOrder,
-        )
+    var searchResult by remember { mutableStateOf(SmartSearchResult()) }
+    LaunchedEffect(filteredByFormat, debouncedQuery, searchFilterMode, selectedArtistFilter, sortOrder) {
+        isSearching = true
+        val computed = withContext(Dispatchers.Default) {
+            MusicSearchEngine.searchTracks(
+                tracks = filteredByFormat,
+                query = debouncedQuery,
+                filterMode = searchFilterMode,
+                selectedArtist = selectedArtistFilter,
+                sortOrder = sortOrder,
+            )
+        }
+        searchResult = computed
+        isSearching = false
+    }
+
+    var allArtistCandidates by remember { mutableStateOf<List<ArtistFilterCandidate>>(emptyList()) }
+    LaunchedEffect(tracks) {
+        allArtistCandidates = withContext(Dispatchers.Default) {
+            MusicSearchEngine.extractArtistCandidates(tracks, "")
+        }
     }
 
     val displayedHits = searchResult.hits
     val displayed = remember(displayedHits) { displayedHits.map { it.track } }
-    val allArtistCandidates = remember(tracks) { MusicSearchEngine.extractArtistCandidates(tracks, "") }
 
-    val targetArtistForPlaylist = remember(selectedArtistFilter, searchResult.matchingArtists, query) {
+    val targetArtistForPlaylist = remember(selectedArtistFilter, searchResult.matchingArtists, debouncedQuery) {
         selectedArtistFilter ?: searchResult.matchingArtists.firstOrNull()?.takeIf {
-            val normQ = MusicSearchEngine.normalizeText(query)
+            val normQ = MusicSearchEngine.normalizeText(debouncedQuery)
             normQ.isNotBlank() && MusicSearchEngine.normalizeText(it.name).let { n ->
                 n == normQ || n.startsWith(normQ)
             }
@@ -464,6 +500,18 @@ fun AllSongsScreen(
                     .testTag("songs_search_input"),
             )
 
+            if (isSearching || query != debouncedQuery) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .height(2.dp)
+                        .testTag("search_loading_indicator"),
+                    color = colors.primary,
+                    trackColor = colors.card,
+                )
+            }
+
             // Search Filter Mode Row: Todos | Artista exato | Artista e colaborações + Artist Picker
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
@@ -593,7 +641,7 @@ fun AllSongsScreen(
             }
 
             // Result Count & Create Artist Playlist Action Banner
-            if (query.isNotBlank() || selectedArtistFilter != null || searchFilterMode != SearchFilterMode.ALL) {
+            if (debouncedQuery.isNotBlank() || selectedArtistFilter != null || searchFilterMode != SearchFilterMode.ALL) {
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -784,11 +832,11 @@ fun AllSongsScreen(
                         val isSelected = track.id in selectedIds
                         val badge = when {
                             hit.parsedArtists.isCollaboration -> "Feat."
-                            query.isNotBlank() && hit.matchSource == SearchMatchSource.GENRE -> track.genre
-                            query.isNotBlank() && hit.matchSource == SearchMatchSource.ALBUM -> "Álbum"
+                            debouncedQuery.isNotBlank() && hit.matchSource == SearchMatchSource.GENRE -> track.genre
+                            debouncedQuery.isNotBlank() && hit.matchSource == SearchMatchSource.ALBUM -> "Álbum"
                             else -> null
                         }
-                        StaggeredEntryContainer(index = index) {
+                        val rowContent: @Composable () -> Unit = {
                             CompactTrackRow(
                                 track = track,
                                 isCurrent = track.id == currentTrackId,
@@ -810,7 +858,16 @@ fun AllSongsScreen(
                                 badgeText = badge,
                                 onFixUnknownArtist = { onBatchEditTags(listOf(track.id)) },
                                 onMoreClick = { onTrackMoreClick(track) },
+                                precomputedDisplayArtist = hit.parsedArtists.displayArtist,
+                                precomputedIsUnknown = hit.parsedArtists.isUnknownArtist,
                             )
+                        }
+                        if (debouncedQuery.isNotBlank() || displayedHits.size > 40) {
+                            rowContent()
+                        } else {
+                            StaggeredEntryContainer(index = index) {
+                                rowContent()
+                            }
                         }
                     }
                 }
@@ -958,6 +1015,7 @@ fun ArtistsScreen(
     val colors = LocalMyatoColors.current
     var selectedArtist by remember { mutableStateOf<String?>(null) }
     var artistQuery by remember { mutableStateOf("") }
+    var debouncedArtistQuery by remember { mutableStateOf("") }
     var includeCollabs by remember { mutableStateOf(false) }
     var artistPlaylistDialogTarget by remember { mutableStateOf<String?>(null) }
 
@@ -965,8 +1023,20 @@ fun ArtistsScreen(
         selectedArtist = null
     }
 
-    val artistCandidates = remember(tracks, artistQuery) {
-        MusicSearchEngine.extractArtistCandidates(tracks, artistQuery)
+    LaunchedEffect(artistQuery) {
+        if (artistQuery.isBlank()) {
+            debouncedArtistQuery = ""
+        } else {
+            delay(250L)
+            debouncedArtistQuery = artistQuery
+        }
+    }
+
+    var artistCandidates by remember { mutableStateOf<List<ArtistFilterCandidate>>(emptyList()) }
+    LaunchedEffect(tracks, debouncedArtistQuery) {
+        artistCandidates = withContext(Dispatchers.Default) {
+            MusicSearchEngine.extractArtistCandidates(tracks, debouncedArtistQuery)
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {

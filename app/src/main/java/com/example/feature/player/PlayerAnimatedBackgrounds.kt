@@ -189,25 +189,6 @@ private fun AudioSpectrumBackground(
     val smoothedBars = remember { FloatArray(barCount) { 0f } }
     val peakHoldBars = remember { FloatArray(barCount) { 0f } }
 
-    val runMotion = hasTrack && isPlaying && motion.isAnimationsActive
-    val phaseState = if (runMotion) {
-        val transition = rememberInfiniteTransition(label = "bg_spectrum_transition")
-        transition.animateFloat(
-            initialValue = 0f,
-            targetValue = 2f * PI.toFloat(),
-            animationSpec = infiniteRepeatable(
-                animation = tween(
-                    durationMillis = if (motion.isReducedMotionActive) 4200 else 2400,
-                    easing = LinearEasing,
-                ),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "bg_spectrum_phase",
-        )
-    } else {
-        remember { mutableFloatStateOf(0f) }
-    }
-
     // Smooth deceleration down to 0 on pause, fade out completely on stop
     val playbackGain by animateFloatAsState(
         targetValue = if (!hasTrack) 0f else if (isPlaying) 1f else 0f,
@@ -235,7 +216,6 @@ private fun AudioSpectrumBackground(
         val h = size.height
         if (w <= 0f || h <= 0f) return@Canvas
 
-        val phase = phaseState.value
         val gain = playbackGain
 
         if (cachedBarBrush == null || kotlin.math.abs(cachedHeight - h) > 2f) {
@@ -276,21 +256,16 @@ private fun AudioSpectrumBackground(
         val barBrush = cachedBarBrush!!
 
         for (i in 0 until barCount) {
-            val rawTarget = when {
-                gain <= 0.01f -> 0f
-                hasReal -> {
-                    val srcIdx = ((i * spectrumBars.size) / barCount).coerceIn(0, spectrumBars.lastIndex)
-                    val raw = spectrumBars[srcIdx].coerceIn(0f, 1f)
-                    val bandWeight = if (i < 6) 1.18f else if (i < 16) 1.0f else 0.9f
-                    (raw * bandWeight * intensity).coerceIn(0.05f, 1f)
-                }
-                else -> {
-                    // Subtle decorative idle motion when device Visualizer FFT isn't active
-                    val pos = i.toFloat() / barCount.toFloat()
-                    val waveA = sin(phase * 2f + pos * 5.2f) * 0.5f + 0.5f
-                    val waveB = cos(phase - pos * 3.1f) * 0.5f + 0.5f
-                    ((0.12f + 0.28f * waveA * waveB) * intensity).coerceIn(0.05f, 0.58f)
-                }
+            val rawTarget = if (gain > 0.01f && hasReal) {
+                val srcPos = (i.toFloat() / (barCount - 1).coerceAtLeast(1)) * (spectrumBars.size - 1).coerceAtLeast(0)
+                val lo = srcPos.toInt().coerceIn(0, spectrumBars.lastIndex)
+                val hi = (lo + 1).coerceIn(0, spectrumBars.lastIndex)
+                val frac = srcPos - lo
+                val interpolated = spectrumBars[lo] * (1f - frac) + spectrumBars[hi] * frac
+                val bandWeight = if (i < 8) 1.12f else if (i < 17) 1.0f else 0.94f
+                (interpolated.coerceIn(0f, 1f) * bandWeight * intensity).coerceIn(0f, 1f)
+            } else {
+                0f
             }
             val target = rawTarget * gain
             val prev = smoothedBars[i]

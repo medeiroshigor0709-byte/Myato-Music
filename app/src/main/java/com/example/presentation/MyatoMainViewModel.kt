@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.MyatoApplication
+import com.example.core.audio.AudioVisualizerFrame
 import com.example.core.audio.PlaybackController
 import com.example.core.audio.PlaybackControllerHolder
 import com.example.core.audio.PlaybackUiState
@@ -25,6 +26,7 @@ import com.example.core.storage.LibraryScanResult
 import com.example.core.storage.MyatoBackupBundle
 import com.example.domain.models.AlbumItem
 import com.example.domain.models.AppFontOption
+import com.example.domain.models.ArtistFilterCandidate
 import com.example.domain.models.ArtistItem
 import com.example.domain.models.AudioFormatCapability
 import com.example.domain.models.BackupPreview
@@ -50,6 +52,7 @@ import com.example.domain.models.ThemeAnimationIntensity
 import com.example.domain.models.ThemeAutoScheduleMode
 import com.example.domain.models.TrackSortOrder
 import com.example.widgets.WidgetUpdateHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -59,6 +62,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MyatoMainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -131,6 +135,7 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
     val equalizerPresets = playbackController.equalizerEngine.savedPresets
     val spectrumBars = playbackController.equalizerEngine.spectrumBars
     val hasRealFftSignal = playbackController.equalizerEngine.hasRealFftSignal
+    val visualizerFrame: StateFlow<AudioVisualizerFrame> = playbackController.equalizerEngine.visualizerFrame
     val sleepTimerState = playbackController.sleepTimerManager.state
 
     val audioCapabilities: List<AudioFormatCapability> by lazy { AudioFormatSupport.detectDeviceCapabilities() }
@@ -159,6 +164,26 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
                     if (snapshot.isNotEmpty() && !_isScanning.value) {
                         app.playlistRepository.syncAutoUpdateArtistPlaylists()
                     }
+                }
+        }
+        // Pre-warm search index off the main thread whenever library changes
+        viewModelScope.launch {
+            tracks.collect { trackList ->
+                if (trackList.isNotEmpty()) {
+                    withContext(Dispatchers.Default) {
+                        MusicSearchEngine.prewarmIndex(trackList)
+                    }
+                }
+            }
+        }
+        // Keep visualizer hardware attachment synchronized with saved preference on startup & updates
+        viewModelScope.launch {
+            preferences
+                .map { it.visualizerEnabled }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    if (enabled) playbackController.equalizerEngine.startVisualizerIfPermitted()
+                    else playbackController.equalizerEngine.stopVisualizer()
                 }
         }
     }
@@ -241,6 +266,29 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         selectedArtist = selectedArtist,
         sortOrder = sortOrder,
     )
+
+    suspend fun searchTracksOffMain(
+        list: List<MusicTrack>,
+        query: String,
+        filterMode: SearchFilterMode,
+        selectedArtist: String?,
+        sortOrder: TrackSortOrder,
+    ): SmartSearchResult = withContext(Dispatchers.Default) {
+        MusicSearchEngine.searchTracks(
+            tracks = list,
+            query = query,
+            filterMode = filterMode,
+            selectedArtist = selectedArtist,
+            sortOrder = sortOrder,
+        )
+    }
+
+    suspend fun extractArtistCandidatesOffMain(
+        list: List<MusicTrack>,
+        query: String = "",
+    ): List<ArtistFilterCandidate> = withContext(Dispatchers.Default) {
+        MusicSearchEngine.extractArtistCandidates(list, query)
+    }
 
     // Playback & Multi-Queue
     fun playTracks(
@@ -597,6 +645,14 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun setReduceEffectsOnLowBattery(enabled: Boolean) {
         viewModelScope.launch { app.preferencesStore.setReduceEffectsOnLowBattery(enabled) }
+    }
+
+    fun setSearchDebounceMs(debounceMs: Long) {
+        viewModelScope.launch { app.preferencesStore.setSearchDebounceMs(debounceMs) }
+    }
+
+    fun refreshVisualizerState() {
+        playbackController.equalizerEngine.refreshVisualizerState()
     }
 
     fun setAppForeground(inForeground: Boolean) {

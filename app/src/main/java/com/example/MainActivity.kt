@@ -1,6 +1,7 @@
 package com.example
 
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,6 +18,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        volumeControlStream = AudioManager.STREAM_MUSIC
         handleIntentExtras(intent)
         setContent {
             MyatoRootApp(
@@ -25,6 +27,12 @@ class MainActivity : ComponentActivity() {
                 openPlaylistPickerOnStart = intent?.getBooleanExtra("extra_open_playlist_picker", false) == true,
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.playbackController.syncVolumeFromDevice(force = true)
+        viewModel.refreshVisualizerState()
     }
 
     override fun onNewIntent(intent: Intent) {

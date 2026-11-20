@@ -38,25 +38,31 @@ class EqualizerEngine(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val spectrumAnalyzer = AudioSpectrumAnalyzer()
 
     private var equalizer: Equalizer? = null
     private var bassBoost: BassBoost? = null
     private var virtualizer: Virtualizer? = null
     private var loudnessEnhancer: LoudnessEnhancer? = null
     private var visualizer: Visualizer? = null
+    private var visualizerSessionId: Int = 0
     private var attachedSessionId: Int = 0
     private var isForegroundActive: Boolean = true
     private var isVisualizerUserEnabled: Boolean = true
-    private val reusableFftMagnitudes = FloatArray(16)
+    private var isPlaybackActive: Boolean = false
+    private var hasLoadedTrack: Boolean = false
 
     private val _state = MutableStateFlow(AudioEqualizerState())
     val state: StateFlow<AudioEqualizerState> = _state.asStateFlow()
 
-    private val _spectrumBars = MutableStateFlow(List(16) { 0f })
+    private val _spectrumBars = MutableStateFlow(List(AudioSpectrumAnalyzer.BAR_COUNT) { 0f })
     val spectrumBars: StateFlow<List<Float>> = _spectrumBars.asStateFlow()
 
     private val _hasRealFftSignal = MutableStateFlow(false)
     val hasRealFftSignal: StateFlow<Boolean> = _hasRealFftSignal.asStateFlow()
+
+    private val _visualizerFrame = MutableStateFlow(AudioVisualizerFrame.Empty)
+    val visualizerFrame: StateFlow<AudioVisualizerFrame> = _visualizerFrame.asStateFlow()
 
     private val _savedPresets = MutableStateFlow<List<AudioPresetEntity>>(emptyList())
     val savedPresets: StateFlow<List<AudioPresetEntity>> = _savedPresets.asStateFlow()
@@ -89,7 +95,8 @@ class EqualizerEngine(
 
     fun attachToAudioSession(audioSessionId: Int) {
         if (audioSessionId <= 0 || audioSessionId == attachedSessionId) return
-        releaseEffects()
+        releaseEffectsOnly()
+        releaseVisualizerInstance()
         attachedSessionId = audioSessionId
 
         val eq = runCatching { Equalizer(0, audioSessionId) }.getOrNull()
@@ -99,6 +106,7 @@ class EqualizerEngine(
                 availabilityReason = "O hardware/sistema de áudio deste dispositivo não expôs o módulo Equalizer para esta sessão.",
                 bands = emptyList(),
             )
+            syncVisualizerLifecycle()
             return
         }
 
@@ -133,77 +141,156 @@ class EqualizerEngine(
         scope.launch {
             applySavedProfileForDevice(_state.value.outputDevice)
         }
+        syncVisualizerLifecycle()
+    }
+
+    fun onPlaybackStateChanged(isPlaying: Boolean, hasTrack: Boolean) {
+        isPlaybackActive = isPlaying
+        hasLoadedTrack = hasTrack
+        syncVisualizerLifecycle()
+    }
+
+    fun onTrackTransitioned() {
+        spectrumAnalyzer.reset(
+            if (isPlaybackActive) VisualizerCaptureStatus.ACTIVE_SYNCED else VisualizerCaptureStatus.PAUSED
+        )
+        syncVisualizerLifecycle()
+    }
+
+    fun refreshVisualizerState() {
+        syncVisualizerLifecycle()
     }
 
     fun startVisualizerIfPermitted() {
         isVisualizerUserEnabled = true
-        if (!isForegroundActive || attachedSessionId <= 0) return
-        val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-            PackageManager.PERMISSION_GRANTED
-        if (!hasPerm) {
-            _hasRealFftSignal.value = false
-            return
-        }
-        if (visualizer != null) {
-            runCatching { visualizer?.enabled = true }
-            return
-        }
-        runCatching {
-            val viz = Visualizer(attachedSessionId).apply {
-                captureSize = Visualizer.getCaptureSizeRange()[1].coerceAtMost(256)
-                setDataCaptureListener(
-                    object : Visualizer.OnDataCaptureListener {
-                        override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
-                        override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, samplingRate: Int) {
-                            if (fft == null || fft.size < 4 || !isForegroundActive || !isVisualizerUserEnabled) return
-                            val step = ((fft.size / 2) / 16).coerceAtLeast(1)
-                            var hasSignal = false
-                            for (i in 0 until 16) {
-                                val idx = (i * step * 2).coerceIn(0, fft.size - 2)
-                                val re = fft[idx].toFloat()
-                                val im = fft[idx + 1].toFloat()
-                                val mag = (kotlin.math.hypot(re, im) / 96f).coerceIn(0f, 1f)
-                                if (mag > 0.04f) hasSignal = true
-                                reusableFftMagnitudes[i] = mag.coerceAtLeast(0.04f)
-                            }
-                            if (!hasSignal && !_hasRealFftSignal.value) return
-                            _hasRealFftSignal.value = hasSignal
-                            _spectrumBars.value = reusableFftMagnitudes.toList()
-                        }
-                    },
-                    Visualizer.getMaxCaptureRate() / 2,
-                    false,
-                    true,
-                )
-                enabled = true
-            }
-            visualizer = viz
-        }.onFailure {
-            _hasRealFftSignal.value = false
-        }
+        syncVisualizerLifecycle()
     }
 
     fun setVisualizerAppForeground(inForeground: Boolean) {
         if (isForegroundActive == inForeground) return
         isForegroundActive = inForeground
-        if (!inForeground) {
-            runCatching { visualizer?.enabled = false }
-            _hasRealFftSignal.value = false
-            _spectrumBars.value = List(16) { 0f }
-        } else if (isVisualizerUserEnabled) {
-            startVisualizerIfPermitted()
-        }
+        syncVisualizerLifecycle()
     }
 
     fun stopVisualizer() {
         isVisualizerUserEnabled = false
+        releaseVisualizerInstance()
+        emitInactiveFrame(VisualizerCaptureStatus.DISABLED)
+    }
+
+    private fun syncVisualizerLifecycle() {
+        if (!isVisualizerUserEnabled) {
+            releaseVisualizerInstance()
+            emitInactiveFrame(VisualizerCaptureStatus.DISABLED)
+            return
+        }
+        if (!hasLoadedTrack) {
+            releaseVisualizerInstance()
+            emitInactiveFrame(VisualizerCaptureStatus.STOPPED)
+            return
+        }
+        if (!isPlaybackActive || !isForegroundActive) {
+            releaseVisualizerInstance()
+            emitInactiveFrame(VisualizerCaptureStatus.PAUSED)
+            return
+        }
+        if (attachedSessionId <= 0) {
+            releaseVisualizerInstance()
+            emitInactiveFrame(VisualizerCaptureStatus.NO_AUDIO_SESSION)
+            return
+        }
+
+        val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!hasPerm) {
+            releaseVisualizerInstance()
+            emitInactiveFrame(VisualizerCaptureStatus.PERMISSION_REQUIRED)
+            return
+        }
+
+        val currentViz = visualizer
+        if (currentViz != null && visualizerSessionId == attachedSessionId) {
+            val enabledOk = runCatching {
+                if (!currentViz.enabled) currentViz.enabled = true
+                true
+            }.getOrDefault(false)
+            if (enabledOk) return
+            releaseVisualizerInstance()
+        } else if (currentViz != null) {
+            releaseVisualizerInstance()
+        }
+
         runCatching {
+            val sizeRange = Visualizer.getCaptureSizeRange()
+            val minSize = sizeRange.getOrNull(0) ?: 128
+            val maxSize = sizeRange.getOrNull(1) ?: 1024
+            var preferredSize = 1024.coerceIn(minSize, maxSize)
+            // Ensure power of two inside hardware limits
+            var pow2 = 128
+            while (pow2 * 2 <= preferredSize) pow2 *= 2
+            preferredSize = pow2.coerceIn(minSize, maxSize)
+
+            val captureRate = Visualizer.getMaxCaptureRate().coerceIn(8_000, 20_000)
+
+            val viz = Visualizer(attachedSessionId).apply {
+                captureSize = preferredSize
+                runCatching { scalingMode = Visualizer.SCALING_MODE_NORMALIZED }
+                runCatching { measurementMode = Visualizer.MEASUREMENT_MODE_NONE }
+                setDataCaptureListener(
+                    object : Visualizer.OnDataCaptureListener {
+                        override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {
+                            if (!isPlaybackActive || !isForegroundActive || !isVisualizerUserEnabled) return
+                            spectrumAnalyzer.processWaveformCapture(waveform)
+                        }
+
+                        override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, samplingRate: Int) {
+                            if (fft == null || fft.size < 4 || !isPlaybackActive || !isForegroundActive || !isVisualizerUserEnabled) {
+                                return
+                            }
+                            val frame = spectrumAnalyzer.processFftCapture(
+                                fft = fft,
+                                samplingRateRaw = samplingRate,
+                                status = VisualizerCaptureStatus.ACTIVE_SYNCED,
+                            )
+                            _hasRealFftSignal.value = frame.hasRealSignal
+                            _spectrumBars.value = frame.bars
+                            _visualizerFrame.value = frame
+                        }
+                    },
+                    captureRate,
+                    true,
+                    true,
+                )
+                enabled = true
+            }
+            visualizer = viz
+            visualizerSessionId = attachedSessionId
+            if (_visualizerFrame.value.status != VisualizerCaptureStatus.ACTIVE_SYNCED) {
+                _visualizerFrame.value = _visualizerFrame.value.copy(
+                    status = VisualizerCaptureStatus.ACTIVE_SYNCED,
+                )
+            }
+        }.onFailure {
+            releaseVisualizerInstance()
+            emitInactiveFrame(VisualizerCaptureStatus.UNAVAILABLE)
+        }
+    }
+
+    private fun emitInactiveFrame(status: VisualizerCaptureStatus) {
+        val frame = spectrumAnalyzer.reset(status)
+        _hasRealFftSignal.value = false
+        _spectrumBars.value = frame.bars
+        _visualizerFrame.value = frame
+    }
+
+    private fun releaseVisualizerInstance() {
+        runCatching {
+            visualizer?.setDataCaptureListener(null, Visualizer.getMaxCaptureRate(), false, false)
             visualizer?.enabled = false
             visualizer?.release()
         }
         visualizer = null
-        _hasRealFftSignal.value = false
-        _spectrumBars.value = List(16) { 0f }
+        visualizerSessionId = 0
     }
 
     fun detectCurrentOutputDevice(): AudioOutputDeviceType {
@@ -417,8 +504,7 @@ class EqualizerEngine(
         }
     }
 
-    fun releaseEffects() {
-        stopVisualizer()
+    private fun releaseEffectsOnly() {
         runCatching { equalizer?.release() }
         runCatching { bassBoost?.release() }
         runCatching { virtualizer?.release() }
@@ -427,6 +513,16 @@ class EqualizerEngine(
         bassBoost = null
         virtualizer = null
         loudnessEnhancer = null
+    }
+
+    fun releaseEffects() {
+        stopVisualizer()
+        releaseEffectsOnly()
         attachedSessionId = 0
+    }
+
+    fun releaseAll() {
+        releaseEffects()
+        runCatching { audioManager.unregisterAudioDeviceCallback(deviceCallback) }
     }
 }

@@ -72,6 +72,7 @@ data class AppUserPreferences(
     val themeAutoDayThemeId: String = BuiltInThemes.PureWhite.id,
     val themeAutoNightThemeId: String = BuiltInThemes.MyatoOriginal.id,
     val lastAutoThemeSwitchAt: Long = 0L,
+    val searchDebounceMs: Long = 280L,
 )
 
 class AppPreferencesStore(private val context: Context) {
@@ -119,6 +120,7 @@ class AppPreferencesStore(private val context: Context) {
         val THEME_AUTO_DAY_ID = stringPreferencesKey("theme_auto_day_id")
         val THEME_AUTO_NIGHT_ID = stringPreferencesKey("theme_auto_night_id")
         val LAST_AUTO_THEME_SWITCH_AT = longPreferencesKey("last_auto_theme_switch_at")
+        val SEARCH_DEBOUNCE_MS = longPreferencesKey("search_debounce_ms")
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -170,6 +172,7 @@ class AppPreferencesStore(private val context: Context) {
             themeAutoDayThemeId = BuiltInThemes.resolveThemeId(prefs[Keys.THEME_AUTO_DAY_ID] ?: BuiltInThemes.PureWhite.id),
             themeAutoNightThemeId = BuiltInThemes.resolveThemeId(prefs[Keys.THEME_AUTO_NIGHT_ID] ?: BuiltInThemes.MyatoOriginal.id),
             lastAutoThemeSwitchAt = prefs[Keys.LAST_AUTO_THEME_SWITCH_AT] ?: 0L,
+            searchDebounceMs = (prefs[Keys.SEARCH_DEBOUNCE_MS] ?: 280L).coerceIn(250L, 350L),
         )
     }
 
@@ -467,6 +470,13 @@ class AppPreferencesStore(private val context: Context) {
                     prefs[Keys.VISUALIZER_INTENSITY] = ThemeAnimationIntensity.INTENSE.factor
                 }
             }
+        }
+    }
+
+    suspend fun setSearchDebounceMs(debounceMs: Long) {
+        val clamped = debounceMs.coerceIn(250L, 350L)
+        context.myatoDataStore.edit { prefs ->
+            prefs[Keys.SEARCH_DEBOUNCE_MS] = clamped
         }
     }
 }

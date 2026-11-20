@@ -51,11 +51,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -74,7 +77,9 @@ import com.example.core.designsystem.AlbumArtwork
 import com.example.core.designsystem.LocalMyatoColors
 import com.example.core.designsystem.MyatoCompactBrandBadge
 import com.example.core.designsystem.MyatoOfficialBrandLockup
+import com.example.core.metadata.MusicSearchEngine
 import com.example.domain.models.AlbumItem
+import kotlin.math.roundToLong
 import com.example.domain.models.ArtistItem
 import com.example.domain.models.AudioFormatCapability
 import com.example.domain.models.BackupPreview
@@ -473,6 +478,7 @@ fun SettingsScreen(
     activeThemeName: String = "Myato Original",
     onOpenMyatoThemes: () -> Unit = {},
     onSelectAnimationIntensity: (com.example.domain.models.ThemeAnimationIntensity) -> Unit = {},
+    onSetSearchDebounceMs: (Long) -> Unit = {},
 ) {
     val colors = LocalMyatoColors.current
     var showFormatsDialog by remember { mutableStateOf(false) }
@@ -561,6 +567,52 @@ fun SettingsScreen(
         SettingToggleCard("Economia de animações", "Desativa rotações e efeitos pesados para poupar bateria.", preferences.batterySaverAnimations, onSetBatterySaverAnim)
         SettingToggleCard("Ações extras na notificação", "Exibe botão rápido de Adicionar/Remover Playlist na mídia.", preferences.notificationShowPlaylistButton) {
             onSetNotificationPrefs(preferences.notificationCompactActions, it)
+        }
+
+        // Configurable search debounce card (250–350 ms)
+        var debounceDraft by remember(preferences.searchDebounceMs) {
+            mutableFloatStateOf(preferences.searchDebounceMs.toFloat().coerceIn(250f, 350f))
+        }
+        Card(
+            colors = CardDefaults.cardColors(containerColor = colors.cardSurfaceColor()),
+            border = colors.borderStroke(),
+            shape = colors.resolveCardShape(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .testTag("settings_search_debounce_card"),
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Debounce da pesquisa musical", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                    Text(
+                        text = "${debounceDraft.roundToLong()} ms",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = colors.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Text(
+                    text = "Aguarda entre ${MusicSearchEngine.MIN_SEARCH_DEBOUNCE_MS} e ${MusicSearchEngine.MAX_SEARCH_DEBOUNCE_MS} ms ao digitar para evitar travamentos.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                )
+                Slider(
+                    value = debounceDraft,
+                    onValueChange = { debounceDraft = it },
+                    onValueChangeFinished = { onSetSearchDebounceMs(debounceDraft.roundToLong()) },
+                    valueRange = MusicSearchEngine.MIN_SEARCH_DEBOUNCE_MS.toFloat()..MusicSearchEngine.MAX_SEARCH_DEBOUNCE_MS.toFloat(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = colors.primary,
+                        activeTrackColor = colors.primary,
+                    ),
+                    modifier = Modifier.testTag("settings_search_debounce_slider"),
+                )
+            }
         }
 
         Spacer(Modifier.height(12.dp))

@@ -86,6 +86,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -115,7 +116,11 @@ import com.example.domain.models.MusicTrack
 import com.example.domain.models.PlaybackQueue
 import com.example.domain.models.Playlist
 import com.example.domain.models.SearchFilterMode
+import com.example.domain.models.SmartSearchResult
 import com.example.domain.models.TrackSortOrder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import com.example.feature.library.SimpleHeader
 import kotlinx.coroutines.flow.Flow
 
@@ -1502,19 +1507,32 @@ fun AddSongsToPlaylistDialog(
 ) {
     val colors = LocalMyatoColors.current
     var query by remember { mutableStateOf("") }
+    var debouncedQuery by remember { mutableStateOf("") }
     var filterMode by remember { mutableStateOf(SearchFilterMode.ALL) }
     var allowDuplicates by remember { mutableStateOf(false) }
     var showConfirmationStep by remember { mutableStateOf(false) }
     val chosenIds = remember { mutableStateListOf<Long>() }
 
-    val searchResult = remember(allTracks, query, filterMode) {
-        MusicSearchEngine.searchTracks(
-            tracks = allTracks,
-            query = query,
-            filterMode = filterMode,
-            selectedArtist = null,
-            sortOrder = TrackSortOrder.TITLE_ASC,
-        )
+    LaunchedEffect(query) {
+        if (query.isBlank()) {
+            debouncedQuery = ""
+        } else {
+            delay(250L)
+            debouncedQuery = query
+        }
+    }
+
+    var searchResult by remember { mutableStateOf(SmartSearchResult()) }
+    LaunchedEffect(allTracks, debouncedQuery, filterMode) {
+        searchResult = withContext(Dispatchers.Default) {
+            MusicSearchEngine.searchTracks(
+                tracks = allTracks,
+                query = debouncedQuery,
+                filterMode = filterMode,
+                selectedArtist = null,
+                sortOrder = TrackSortOrder.TITLE_ASC,
+            )
+        }
     }
     val filteredHits = searchResult.hits
     val tracksById = remember(allTracks) { allTracks.associateBy { it.id } }
@@ -1693,11 +1711,15 @@ fun AddSongsToPlaylistDialog(
                                 }
                             }
                         } else {
-                            items(filteredHits, key = { it.track.id }) { hit ->
+                            items(
+                                items = filteredHits,
+                                key = { it.track.id },
+                                contentType = { "dialog_track_row" },
+                            ) { hit ->
                                 val track = hit.track
                                 val alreadyInPlaylist = track.id in existingTrackIds
                                 val isChecked = track.id in chosenIds
-                                val displayArtist = MusicSearchEngine.sanitizeArtistName(track.artist)
+                                val displayArtist = hit.parsedArtists.displayArtist
 
                                 Row(
                                     modifier = Modifier

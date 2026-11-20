@@ -160,13 +160,18 @@ fun AlbumArtwork(
     ) {
         if (!artUri.isNullOrBlank()) {
             AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(artUri)
-                    .size(sizePx)
-                    .crossfade(colors.animationMode != AnimationMode.BATTERY_SAVER && motion.isAnimationsActive)
-                    .error(R.drawable.img_default_album_art)
-                    .placeholder(R.drawable.img_default_album_art)
-                    .build(),
+                model = remember(artUri, sizePx, small, motion.isAnimationsActive, colors.animationMode) {
+                    ImageRequest.Builder(context)
+                        .data(artUri)
+                        .memoryCacheKey("${artUri}_$sizePx")
+                        .diskCacheKey(artUri)
+                        .size(sizePx)
+                        .allowRgb565(small)
+                        .crossfade(colors.animationMode != AnimationMode.BATTERY_SAVER && motion.isAnimationsActive)
+                        .error(R.drawable.img_default_album_art)
+                        .placeholder(R.drawable.img_default_album_art)
+                        .build()
+                },
                 contentDescription = stringResource(R.string.cd_album_cover),
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
@@ -189,29 +194,16 @@ fun FrequencyBarsVisualizer(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalMyatoColors.current
-    val useAnimatedFallback = isPlaying && bars.all { it <= 0.06f } && colors.animationMode != AnimationMode.BATTERY_SAVER
-    val infiniteTransition = rememberInfiniteTransition(label = "eq_bars")
-    val phase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (Math.PI * 2).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "eq_phase",
-    )
 
     Canvas(modifier = modifier) {
         val count = bars.size.coerceAtLeast(12)
         val gap = 4.dp.toPx()
         val barWidth = ((size.width - gap * (count - 1)) / count).coerceAtLeast(2.dp.toPx())
         for (i in 0 until count) {
-            val amplitude = when {
-                !isPlaying -> 0.12f
-                useAnimatedFallback -> {
-                    (0.28f + 0.55f * kotlin.math.abs(kotlin.math.sin(phase + i * 0.55f))).coerceIn(0.12f, 1f)
-                }
-                else -> bars.getOrElse(i) { 0.15f }.coerceIn(0.10f, 1f)
+            val amplitude = if (!isPlaying) {
+                0.08f
+            } else {
+                bars.getOrElse(i) { 0f }.coerceIn(0.06f, 1f)
             }
             val barH = size.height * amplitude
             val x = i * (barWidth + gap)
@@ -274,11 +266,13 @@ fun CompactTrackRow(
     badgeText: String? = null,
     onFixUnknownArtist: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    precomputedDisplayArtist: String? = null,
+    precomputedIsUnknown: Boolean? = null,
 ) {
     val colors = LocalMyatoColors.current
     val motion = LocalMotionSettings.current
-    val displayArtist = remember(track.artist) { MusicSearchEngine.sanitizeArtistName(track.artist) }
-    val isUnknown = remember(track.artist) { MusicSearchEngine.isUnknownArtist(track.artist) }
+    val displayArtist = precomputedDisplayArtist ?: remember(track.artist) { MusicSearchEngine.sanitizeArtistName(track.artist) }
+    val isUnknown = precomputedIsUnknown ?: remember(track.artist) { MusicSearchEngine.isUnknownArtist(track.artist) }
 
     val targetBg = when {
         isSelected -> colors.primary.copy(alpha = 0.16f)

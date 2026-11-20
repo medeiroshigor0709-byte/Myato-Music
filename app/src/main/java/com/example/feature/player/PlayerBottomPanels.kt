@@ -97,13 +97,17 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.verticalScroll
+import com.example.core.audio.AudioSpectrumAnalyzer
+import com.example.core.audio.AudioVisualizerFrame
 import com.example.core.audio.PlaybackUiState
+import com.example.core.audio.VisualizerCaptureStatus
 import com.example.core.common.TimeFormatter
 import com.example.core.designsystem.AlbumArtPaletteExtractor
 import com.example.core.designsystem.AlbumArtwork
@@ -119,8 +123,9 @@ import com.example.domain.models.PlayerVisualBackgroundStyle
 import kotlin.math.sin
 
 /**
- * 1. Animated Audio Visualizer Section
- * Sincronizado com o áudio, graves/médios/agudos, movimento contínuo e estilos configuráveis.
+ * 1. Real Audio-Synchronized Visualizer Section
+ * Sincronizado com o FFT real da sessão do ExoPlayer (Graves/Médios/Agudos),
+ * sem ondas falsas quando em pausa, silêncio ou sem permissão.
  */
 @Composable
 fun AnimatedAudioVisualizerSection(
@@ -131,48 +136,48 @@ fun AnimatedAudioVisualizerSection(
     volumeFraction: Float = 1.0f,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    visualizerFrame: AudioVisualizerFrame? = null,
+    onRequestAudioPermission: (() -> Unit)? = null,
 ) {
     val colors = LocalMyatoColors.current
     val motion = LocalMotionSettings.current
-    val barCount = 18
-    val runMotion = isPlaying && motion.isAnimationsActive
+    val barCount = AudioSpectrumAnalyzer.BAR_COUNT
 
-    // Harmonic continuous sine animation only while actively playing in foreground
-    val phase = if (runMotion) {
-        val infiniteTransition = rememberInfiniteTransition(label = "viz_motion")
-        infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 6.28318f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(if (motion.isReducedMotionActive) 3600 else 2200, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "viz_phase",
-        ).value
-    } else 0f
+    val effectiveStatus = visualizerFrame?.status ?: when {
+        !isPlaying -> VisualizerCaptureStatus.PAUSED
+        spectrumBars.any { it > 0.02f } -> VisualizerCaptureStatus.ACTIVE_SYNCED
+        else -> VisualizerCaptureStatus.UNAVAILABLE
+    }
+    val effectiveBars = visualizerFrame?.bars ?: spectrumBars
+    val bassLevel = visualizerFrame?.bassLevel ?: (effectiveBars.take(6).average().toFloat().coerceIn(0f, 1f))
+    val midLevel = visualizerFrame?.midLevel ?: (effectiveBars.drop(6).take(7).average().toFloat().coerceIn(0f, 1f))
+    val trebleLevel = visualizerFrame?.trebleLevel ?: (effectiveBars.drop(13).take(5).average().toFloat().coerceIn(0f, 1f))
+    val beatPulse = visualizerFrame?.beatPulse ?: 0f
+    val hasActiveRealSignal = isPlaying &&
+        effectiveStatus == VisualizerCaptureStatus.ACTIVE_SYNCED &&
+        ((visualizerFrame?.hasRealSignal ?: effectiveBars.any { it > 0.02f }))
 
-    val effectiveIntensity = if (motion.animationsDisabled) 0f else intensity * (if (motion.isReducedMotionActive) 0.55f else 1f)
+    val effectiveIntensity = if (motion.animationsDisabled) {
+        0f
+    } else {
+        intensity * (if (motion.isReducedMotionActive) 0.65f else 1f)
+    }
 
-    // Compute heights with smooth animated transition
     val heights = (0 until barCount).map { i ->
-        val rawSpectrum = spectrumBars.getOrNull(i.coerceAtMost(spectrumBars.lastIndex)) ?: 0f
-        val harmonicPulse = if (runMotion) {
-            val bassFactor = if (i < 4) 1.25f else 0.85f
-            val wave = (sin(phase + (i * 0.45f)) * 0.5f + 0.5f) * bassFactor
-            wave.toFloat()
+        val rawSpectrum = effectiveBars.getOrNull(i) ?: 0f
+        val target = if (hasActiveRealSignal && rawSpectrum > 0.005f) {
+            val beatBoost = if (i < 6) 1f + beatPulse * 0.16f else 1f
+            (rawSpectrum * beatBoost * effectiveIntensity.coerceAtLeast(0.2f)).coerceIn(0.03f, 1f)
         } else {
-            0.05f
+            0.03f
         }
-        val target = if (rawSpectrum > 0.05f && isPlaying) {
-            (rawSpectrum * 1.2f).coerceIn(0.1f, 1f)
-        } else {
-            if (runMotion) (harmonicPulse * 0.72f * volumeFraction.coerceAtLeast(0.4f)).coerceIn(0.10f, 0.92f)
-            else 0.05f
-        } * effectiveIntensity.coerceAtLeast(0.05f)
-
         val animatedHeight by animateFloatAsState(
-            targetValue = target.coerceIn(0.04f, 1f),
-            animationSpec = spring(stiffness = 350f, dampingRatio = 0.75f),
+            targetValue = target,
+            animationSpec = if (motion.isAnimationsActive) {
+                tween(durationMillis = if (hasActiveRealSignal) 55 else 180, easing = FastOutSlowInEasing)
+            } else {
+                tween(durationMillis = 0)
+            },
             label = "bar_h_$i",
         )
         animatedHeight
@@ -181,7 +186,8 @@ fun AnimatedAudioVisualizerSection(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .padding(vertical = 6.dp)
+            .testTag("audio_visualizer_card"),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = colors.card),
     ) {
@@ -195,7 +201,7 @@ fun AnimatedAudioVisualizerSection(
                     Icon(
                         imageVector = Icons.Rounded.GraphicEq,
                         contentDescription = null,
-                        tint = colors.primary,
+                        tint = if (hasActiveRealSignal) colors.primary else colors.textSecondary,
                         modifier = Modifier.size(20.dp),
                     )
                     Spacer(Modifier.width(8.dp))
@@ -205,13 +211,51 @@ fun AnimatedAudioVisualizerSection(
                         color = colors.primary,
                         fontWeight = FontWeight.Bold,
                     )
+                    if (hasActiveRealSignal && beatPulse > 0.28f) {
+                        Spacer(Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(colors.secondary),
+                        )
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = if (isPlaying) "Sincronizado" else "Em pausa",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isPlaying) colors.primary else colors.textSecondary,
-                    )
+                    if (effectiveStatus == VisualizerCaptureStatus.PERMISSION_REQUIRED && onRequestAudioPermission != null) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = colors.primary.copy(alpha = 0.18f),
+                            modifier = Modifier
+                                .clickable { onRequestAudioPermission() }
+                                .testTag("visualizer_permission_button"),
+                        ) {
+                            Text(
+                                text = "Ativar áudio",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.primary,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            )
+                        }
+                    } else {
+                        val statusText = when {
+                            effectiveStatus == VisualizerCaptureStatus.PERMISSION_REQUIRED -> "Permissão necessária"
+                            effectiveStatus == VisualizerCaptureStatus.DISABLED -> "Desativado"
+                            effectiveStatus == VisualizerCaptureStatus.STOPPED -> "Parado"
+                            effectiveStatus == VisualizerCaptureStatus.PAUSED || !isPlaying -> "Em pausa"
+                            effectiveStatus == VisualizerCaptureStatus.NO_AUDIO_SESSION -> "Aguardando áudio"
+                            effectiveStatus == VisualizerCaptureStatus.UNAVAILABLE -> "FFT indisponível"
+                            hasActiveRealSignal -> "Sincronizado • Real"
+                            else -> "Silêncio detectado"
+                        }
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (hasActiveRealSignal) colors.primary else colors.textSecondary,
+                            modifier = Modifier.testTag("visualizer_status_badge"),
+                        )
+                    }
                     Spacer(Modifier.width(4.dp))
                     IconButton(
                         onClick = onOpenSettings,
@@ -325,14 +369,44 @@ fun AnimatedAudioVisualizerSection(
 
             Spacer(Modifier.height(8.dp))
 
-            // Frequency spectrum bands label indicator
+            // Frequency spectrum bands label indicator driven by real band energies
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("GRAVES (20-250Hz)", style = MaterialTheme.typography.labelSmall, color = colors.textSecondary.copy(alpha = 0.7f), fontSize = 10.sp)
-                Text("MÉDIOS (250-4kHz)", style = MaterialTheme.typography.labelSmall, color = colors.primary.copy(alpha = 0.8f), fontSize = 10.sp)
-                Text("AGUDOS (4k-20kHz)", style = MaterialTheme.typography.labelSmall, color = colors.textSecondary.copy(alpha = 0.7f), fontSize = 10.sp)
+                Text(
+                    text = "GRAVES (20-250Hz)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (hasActiveRealSignal && bassLevel > 0.12f) {
+                        colors.primary.copy(alpha = (0.55f + bassLevel * 0.45f).coerceIn(0f, 1f))
+                    } else {
+                        colors.textSecondary.copy(alpha = 0.65f)
+                    },
+                    fontWeight = if (hasActiveRealSignal && bassLevel > 0.35f) FontWeight.Bold else FontWeight.Normal,
+                    fontSize = 10.sp,
+                )
+                Text(
+                    text = "MÉDIOS (250-4kHz)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (hasActiveRealSignal && midLevel > 0.12f) {
+                        colors.secondary.copy(alpha = (0.55f + midLevel * 0.45f).coerceIn(0f, 1f))
+                    } else {
+                        colors.textSecondary.copy(alpha = 0.65f)
+                    },
+                    fontWeight = if (hasActiveRealSignal && midLevel > 0.35f) FontWeight.Bold else FontWeight.Normal,
+                    fontSize = 10.sp,
+                )
+                Text(
+                    text = "AGUDOS (4k-20kHz)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (hasActiveRealSignal && trebleLevel > 0.10f) {
+                        colors.primary.copy(alpha = (0.55f + trebleLevel * 0.45f).coerceIn(0f, 1f))
+                    } else {
+                        colors.textSecondary.copy(alpha = 0.65f)
+                    },
+                    fontWeight = if (hasActiveRealSignal && trebleLevel > 0.30f) FontWeight.Bold else FontWeight.Normal,
+                    fontSize = 10.sp,
+                )
             }
         }
     }

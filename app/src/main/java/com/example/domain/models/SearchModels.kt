@@ -39,8 +39,8 @@ data class ArtistFilterCandidate(
 )
 
 data class SmartSearchResult(
-    val hits: List<TrackSearchHit>,
-    val matchingArtists: List<ArtistFilterCandidate>,
-    val activeArtistFilter: String?,
-    val filterMode: SearchFilterMode,
+    val hits: List<TrackSearchHit> = emptyList(),
+    val matchingArtists: List<ArtistFilterCandidate> = emptyList(),
+    val activeArtistFilter: String? = null,
+    val filterMode: SearchFilterMode = SearchFilterMode.ALL,
 )
