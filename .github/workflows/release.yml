@@ -88,6 +88,17 @@ jobs:
             fi
           fi
 
+      - name: Cache Robolectric Android All Jars
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric/
+          key: ${{ runner.os }}-robolectric-16-13921718-i7
+          restore-keys: |
+            ${{ runner.os }}-robolectric-
+
+      - name: Prefetch Robolectric Dependencies
+        run: ./gradlew :app:copyRobolectricJars :app:copyRobolectricToM2 --no-daemon
+
       - name: Run Unit & Robolectric Tests
         run: ./gradlew testDebugUnitTest --no-daemon
 

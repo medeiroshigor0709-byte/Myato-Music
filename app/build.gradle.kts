@@ -84,6 +84,8 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
+val robolectricSdkDeps by configurations.creating
+
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
   // implementation(platform(libs.firebase.bom))
@@ -141,6 +143,7 @@ dependencies {
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
+  robolectricSdkDeps(libs.robolectric.android.all)
   androidTestImplementation(platform(libs.androidx.compose.bom))
   androidTestImplementation(libs.androidx.compose.ui.test.junit4)
   androidTestImplementation(libs.androidx.espresso.core)
@@ -151,3 +154,22 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   // "ksp"(libs.moshi.kotlin.codegen)
 }
+
+val copyRobolectricJars by tasks.registering(Copy::class) {
+  from(robolectricSdkDeps)
+  into(layout.buildDirectory.dir("robolectric-dependencies"))
+}
+
+val copyRobolectricToM2 by tasks.registering(Copy::class) {
+  from(robolectricSdkDeps)
+  into(File(System.getProperty("user.home"), ".m2/repository/org/robolectric/android-all-instrumented/16-robolectric-13921718-i7"))
+}
+
+tasks.withType<Test>().configureEach {
+  dependsOn(copyRobolectricJars, copyRobolectricToM2)
+  systemProperty(
+    "robolectric.dependency.dir",
+    layout.buildDirectory.dir("robolectric-dependencies").get().asFile.absolutePath,
+  )
+}
+
