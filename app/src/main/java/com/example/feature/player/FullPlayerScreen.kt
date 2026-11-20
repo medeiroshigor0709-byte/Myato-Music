@@ -383,11 +383,11 @@ fun FullPlayerScreen(
                         .pressScaleFeedback(playInteraction, pressedScale = 0.92f)
                         .testTag("player_play_pause_button")
                         .clip(colors.resolveButtonShape())
-                        .background(colors.primary),
+                        .background(colors.buttonContainer),
                 ) {
                     AnimatedPlayPauseIcon(
                         isPlaying = playbackState.isPlaying,
-                        tint = if (colors.isLight) Color.White else Color.Black,
+                        tint = colors.buttonContent,
                         iconSize = 38.dp,
                     )
                 }
@@ -531,7 +531,7 @@ fun FullPlayerScreen(
                             onAddBookmark(track.id, newLabel.ifBlank { "Ponto ${bookmarks.size + 1}" }, livePositionMs)
                             newLabel = ""
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
                     ) {
                         Text("Salvar")
                     }
@@ -584,7 +584,7 @@ fun FullPlayerScreen(
                     }
                     Button(
                         onClick = { onSaveNote(track.id, noteText); showNoteSheet = false },
-                        colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
                     ) {
                         Text("Salvar Nota")
                     }

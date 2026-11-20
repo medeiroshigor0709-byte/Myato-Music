@@ -209,7 +209,7 @@ fun PlayerVisualStyleSelectorSection(
                     label = { Text(label) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = colors.primary,
-                        selectedLabelColor = if (colors.isLight) Color.White else Color.Black,
+                        selectedLabelColor = colors.onPrimary,
                     ),
                 )
             }

@@ -199,12 +199,12 @@ class MyatoRobolectricTests {
 
     @Test
     fun `theme repository exports and imports custom themes`() = runBlocking {
-        val repo = ThemeRepository(db, prefs)
+        val repo = ThemeRepository(context, db, prefs)
         val exported = repo.exportThemeJson(BuiltInThemes.Cyberpunk)
         val imported = repo.importThemeJson(exported).getOrNull()
         assertNotNull(imported)
         assertFalse(imported!!.isBuiltIn)
-        assertEquals("Cyberpunk", imported.name)
+        assertEquals("Cyber Gamer", imported.name)
     }
 
     @Test
@@ -233,14 +233,14 @@ class MyatoRobolectricTests {
         }
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("theme_center_screen").assertIsDisplayed()
-        composeRule.onNodeWithTag("theme_grid").performScrollToNode(hasText("Neon Galaxy"))
+        composeRule.onNodeWithTag("theme_grid").performScrollToNode(hasTestTag("theme_card_galaxy"))
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Neon Galaxy").performClick()
+        composeRule.onNodeWithTag("theme_card_galaxy").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Pré-visualização: Neon Galaxy").assertIsDisplayed()
+        composeRule.onNodeWithText("Pré-visualização: Galaxy").assertIsDisplayed()
         composeRule.onNodeWithText("Aplicar Tema").performClick()
         composeRule.waitForIdle()
-        assertEquals("neon_galaxy", selectedThemeId)
+        assertEquals("galaxy", selectedThemeId)
     }
 
     @Test
@@ -755,8 +755,8 @@ class MyatoRobolectricTests {
     }
 
     @Test
-    fun `all 12 built-in themes combine seamlessly with custom decorative and general fonts`() {
-        assertEquals(12, BuiltInThemes.all.size)
+    fun `all 50 built-in themes combine seamlessly with custom decorative and general fonts`() {
+        assertEquals(50, BuiltInThemes.all.size)
         BuiltInThemes.all.forEach { theme ->
             val typo = AppFontCatalog.resolveDualTypography(
                 generalFontId = "inter",

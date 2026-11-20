@@ -107,7 +107,6 @@ fun HomeScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("home_screen"),
         contentPadding = PaddingValues(bottom = 140.dp),
     ) {
@@ -219,7 +218,7 @@ fun HomeScreen(
                                     .background(colors.primary),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Icon(Icons.Rounded.PlayArrow, contentDescription = "Abrir player", tint = Color.Black)
+                                Icon(Icons.Rounded.PlayArrow, contentDescription = "Abrir player", tint = colors.onPrimary)
                             }
                         }
                     } else {
@@ -234,7 +233,7 @@ fun HomeScreen(
                                 Icon(
                                     imageVector = if (tracks.isEmpty()) Icons.Rounded.LibraryMusic else Icons.Rounded.Shuffle,
                                     contentDescription = null,
-                                    tint = Color.Black,
+                                    tint = colors.onPrimary,
                                 )
                             }
                             Spacer(Modifier.width(14.dp))
@@ -377,7 +376,7 @@ fun HomeScreen(
                         Spacer(Modifier.height(14.dp))
                         Button(
                             onClick = onOpenPermissions,
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                         ) {
                             Text("Configurar Pastas & Permissões")
                         }

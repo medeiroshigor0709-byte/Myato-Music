@@ -153,7 +153,6 @@ fun LibraryHubScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("library_hub_screen"),
     ) {
         Row(
@@ -293,7 +292,6 @@ fun AllSongsScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("all_songs_screen"),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -479,7 +477,7 @@ fun AllSongsScreen(
                         label = { Text(mode.label, maxLines = 1) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = colors.primary,
-                            selectedLabelColor = Color.Black,
+                            selectedLabelColor = colors.onPrimary,
                         ),
                         modifier = Modifier.testTag("search_mode_${mode.name.lowercase()}"),
                     )
@@ -511,8 +509,8 @@ fun AllSongsScreen(
                             },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = colors.secondary,
-                                selectedLabelColor = Color.Black,
-                                selectedLeadingIconColor = Color.Black,
+                                selectedLabelColor = colors.onSecondary,
+                                selectedLeadingIconColor = colors.onSecondary,
                             ),
                             modifier = Modifier.testTag("artist_filter_picker_chip"),
                         )
@@ -585,8 +583,8 @@ fun AllSongsScreen(
                             label = { Text("${candidate.name} ($countLabel)") },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = colors.primary,
-                                selectedLabelColor = Color.Black,
-                                selectedLeadingIconColor = Color.Black,
+                                selectedLabelColor = colors.onPrimary,
+                                selectedLeadingIconColor = colors.onPrimary,
                             ),
                             modifier = Modifier.testTag("artist_chip_${candidate.name}"),
                         )
@@ -636,7 +634,7 @@ fun AllSongsScreen(
                         if (!targetArtistForPlaylist.isNullOrBlank()) {
                             Button(
                                 onClick = { createArtistPlaylistTarget = targetArtistForPlaylist },
-                                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
                                 shape = RoundedCornerShape(10.dp),
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                                 modifier = Modifier.testTag("create_artist_playlist_button"),
@@ -665,7 +663,7 @@ fun AllSongsScreen(
                         label = { Text(fmt) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = colors.primary,
-                            selectedLabelColor = Color.Black,
+                            selectedLabelColor = colors.onPrimary,
                         ),
                     )
                 }
@@ -692,9 +690,9 @@ fun AllSongsScreen(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.Black)
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = colors.onPrimary)
                         Spacer(Modifier.width(6.dp))
-                        Text("Tocar tudo", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Tocar tudo", color = colors.onPrimary, fontWeight = FontWeight.Bold)
                     }
                 }
                 Surface(
@@ -857,7 +855,7 @@ fun AllSongsScreen(
                     }
                     Button(
                         onClick = { onBatchAddToPlaylists(selectedIds.toList()) },
-                        colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
                         shape = RoundedCornerShape(12.dp),
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -971,7 +969,7 @@ fun ArtistsScreen(
         MusicSearchEngine.extractArtistCandidates(tracks, artistQuery)
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(colors.background)) {
+    Column(modifier = Modifier.fillMaxSize()) {
         SimpleHeader(
             title = selectedArtist ?: "Artistas (${artistCandidates.size})",
             onBack = { if (selectedArtist != null) selectedArtist = null else onBack() },
@@ -1060,7 +1058,7 @@ fun ArtistsScreen(
                     label = { Text("Artista exato") },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = colors.primary,
-                        selectedLabelColor = Color.Black,
+                        selectedLabelColor = colors.onPrimary,
                     ),
                 )
                 FilterChip(
@@ -1070,8 +1068,8 @@ fun ArtistsScreen(
                     label = { Text("Com colaborações") },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = colors.primary,
-                        selectedLabelColor = Color.Black,
-                        selectedLeadingIconColor = Color.Black,
+                        selectedLabelColor = colors.onPrimary,
+                        selectedLeadingIconColor = colors.onPrimary,
                     ),
                 )
                 Spacer(Modifier.weight(1f))
@@ -1084,7 +1082,7 @@ fun ArtistsScreen(
 
             Button(
                 onClick = { artistPlaylistDialogTarget = artistName },
-                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1147,7 +1145,7 @@ fun AlbumsScreen(
     val colors = LocalMyatoColors.current
     var selectedAlbum by remember { mutableStateOf<AlbumItem?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize().background(colors.background)) {
+    Column(modifier = Modifier.fillMaxSize()) {
         SimpleHeader(
             title = selectedAlbum?.title ?: "Álbuns (${albums.size})",
             onBack = { if (selectedAlbum != null) selectedAlbum = null else onBack() },
@@ -1209,7 +1207,7 @@ fun FoldersScreen(
     onPlayFolder: (FolderItem, List<MusicTrack>) -> Unit,
 ) {
     val colors = LocalMyatoColors.current
-    Column(modifier = Modifier.fillMaxSize().background(colors.background)) {
+    Column(modifier = Modifier.fillMaxSize()) {
         SimpleHeader(title = "Pastas de Música (${folders.size})", onBack = onBack)
         LazyColumn(contentPadding = PaddingValues(bottom = 140.dp)) {
             items(folders, key = { it.path }) { folder ->
@@ -1262,7 +1260,7 @@ fun GenresScreen(
     onPlayGenre: (String, List<MusicTrack>) -> Unit,
 ) {
     val colors = LocalMyatoColors.current
-    Column(modifier = Modifier.fillMaxSize().background(colors.background)) {
+    Column(modifier = Modifier.fillMaxSize()) {
         SimpleHeader(title = "Gêneros (${genres.size})", onBack = onBack)
         LazyColumn(contentPadding = PaddingValues(bottom = 140.dp)) {
             items(genres, key = { it.name }) { genre ->
@@ -1304,7 +1302,7 @@ fun FavoritesScreen(
     onTrackMoreClick: (MusicTrack) -> Unit,
 ) {
     val colors = LocalMyatoColors.current
-    Column(modifier = Modifier.fillMaxSize().background(colors.background)) {
+    Column(modifier = Modifier.fillMaxSize()) {
         SimpleHeader(title = "Favoritos (${favorites.size})", onBack = onBack)
         if (favorites.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

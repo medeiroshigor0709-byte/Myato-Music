@@ -151,7 +151,6 @@ fun QueuesScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("queues_screen"),
     ) {
         Row(
@@ -165,7 +164,7 @@ fun QueuesScreen(
             }
             Button(
                 onClick = { showCreateDialog = true },
-                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                 modifier = Modifier
                     .padding(end = 8.dp)
                     .testTag("create_queue_button"),
@@ -483,7 +482,6 @@ fun PlaylistsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("playlists_screen"),
     ) {
         if (selectedPlaylist == null) {
@@ -521,7 +519,7 @@ fun PlaylistsScreen(
                     }
                     Button(
                         onClick = { showCreateDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                         modifier = Modifier.testTag("create_playlist_button"),
                     ) {
                         Icon(Icons.Rounded.Add, contentDescription = null)
@@ -996,7 +994,7 @@ fun PlaylistsScreen(
                 Button(
                     onClick = { showAddSongsSheet = true },
                     modifier = Modifier.weight(1f).testTag("playlist_add_songs_button"),
-                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                     shape = RoundedCornerShape(14.dp),
                 ) {
                     Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -1056,7 +1054,7 @@ fun PlaylistsScreen(
                         Spacer(Modifier.height(16.dp))
                         Button(
                             onClick = { showAddSongsSheet = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                         ) {
                             Text("Adicionar Músicas Agora")
                         }
@@ -1298,7 +1296,7 @@ fun PlaylistsScreen(
                                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                     )
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                                 modifier = Modifier.testTag("pick_playlist_cover_gallery_button"),
                             ) {
                                 Icon(Icons.Rounded.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1357,7 +1355,7 @@ fun PlaylistsScreen(
                         onUpdatePlaylistDetails(pl.id, finalName, finalCover, editedAutoUpdate, editedIncludeCollabs)
                         editTarget = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                     modifier = Modifier.testTag("save_playlist_edits_button"),
                 ) {
                     Text("Salvar", fontWeight = FontWeight.Bold)
@@ -1459,7 +1457,7 @@ fun PlaylistsScreen(
                             )
                             playlistToEditCover = null
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Rounded.PhotoLibrary, contentDescription = null)
@@ -1648,7 +1646,7 @@ fun AddSongsToPlaylistDialog(
                                         label = { Text(mode.label, maxLines = 1) },
                                         colors = FilterChipDefaults.filterChipColors(
                                             selectedContainerColor = colors.primary,
-                                            selectedLabelColor = Color.Black,
+                                            selectedLabelColor = colors.onPrimary,
                                         ),
                                     )
                                 }
@@ -1791,7 +1789,7 @@ fun AddSongsToPlaylistDialog(
                                 onAddTracks(chosenIds.toList(), allowDuplicates)
                             },
                             enabled = chosenIds.isNotEmpty(),
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                             modifier = Modifier.testTag("confirm_manual_add_tracks_button"),
                         ) {
                             Text("Confirmar adição (${chosenIds.size})", fontWeight = FontWeight.Bold)
@@ -1804,7 +1802,7 @@ fun AddSongsToPlaylistDialog(
                         Button(
                             onClick = { showConfirmationStep = true },
                             enabled = chosenIds.isNotEmpty(),
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                             modifier = Modifier.testTag("review_manual_add_tracks_button"),
                         ) {
                             Text("Revisar e Adicionar (${chosenIds.size})", fontWeight = FontWeight.Bold)

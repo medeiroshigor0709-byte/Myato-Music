@@ -99,7 +99,7 @@ fun FontSettingsScreen(
     onDeleteCustomFont: (AppFontOption) -> Unit,
 ) {
     val colors = LocalMyatoColors.current
-    val onPrimary = if (colors.isLight) Color.White else Color.Black
+    val onPrimary = colors.onPrimary
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf<FontCategory?>(null) }
@@ -166,7 +166,6 @@ fun FontSettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("font_settings_screen"),
     ) {
         SimpleHeader(title = "Fontes e tipografia", onBack = onBack)
@@ -729,7 +728,7 @@ private fun FontCatalogCard(
     onDeleteClick: (() -> Unit)?,
 ) {
     val colors = LocalMyatoColors.current
-    val onPrimary = if (colors.isLight) Color.White else Color.Black
+    val onPrimary = colors.onPrimary
     val isSelected = isActiveGeneral || isActiveDecorative
 
     val selectedBadge = when {

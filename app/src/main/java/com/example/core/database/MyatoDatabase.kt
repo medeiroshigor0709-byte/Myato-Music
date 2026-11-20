@@ -30,7 +30,7 @@ import kotlinx.coroutines.launch
         AppSettingsEntity::class,
         BackupMetadataEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class MyatoDatabase : RoomDatabase() {
@@ -88,6 +88,12 @@ abstract class MyatoDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE themes ADD COLUMN extendedConfigJson TEXT NOT NULL DEFAULT '{}'")
+            }
+        }
+
         fun getInstance(context: Context): MyatoDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: buildDatabase(context.applicationContext).also { db ->
@@ -109,13 +115,15 @@ abstract class MyatoDatabase : RoomDatabase() {
                 MyatoDatabase::class.java,
                 DATABASE_NAME,
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
         }
 
         private fun seedInitialDataAsync(db: MyatoDatabase) {
             CoroutineScope(Dispatchers.IO).launch {
-                db.themeDao().insertMissingBuiltInThemes(BuiltInThemes.all.map { it.toEntity() })
+                val builtInEntities = BuiltInThemes.all.map { it.toEntity() }
+                db.themeDao().upsertThemes(builtInEntities)
+                db.themeDao().deleteObsoleteBuiltInThemes(builtInEntities.map { it.id })
                 if (db.queueDao().getQueuesSync().isEmpty()) {
                     db.queueDao().insertQueue(
                         PlaybackQueueEntity(

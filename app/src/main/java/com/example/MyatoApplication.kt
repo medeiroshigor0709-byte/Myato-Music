@@ -39,7 +39,7 @@ class MyatoApplication : Application(), ImageLoaderFactory {
         QueueRepository(database)
     }
     val themeRepository: ThemeRepository by lazy {
-        ThemeRepository(database, preferencesStore)
+        ThemeRepository(this, database, preferencesStore)
     }
     val statsRepository: StatsAndEngagementRepository by lazy {
         StatsAndEngagementRepository(database)

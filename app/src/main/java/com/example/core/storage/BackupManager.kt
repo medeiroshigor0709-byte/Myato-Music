@@ -104,6 +104,7 @@ data class MyatoBackupBundle(
     val history: List<BackupHistoryDto> = emptyList(),
     val statistics: List<BackupStatDto> = emptyList(),
     val customThemes: List<MyatoTheme> = emptyList(),
+    val favoriteThemeIds: List<String> = emptyList(),
 )
 
 class BackupManager(
@@ -169,6 +170,7 @@ class BackupManager(
             history = history.map { BackupHistoryDto(it.trackId, it.trackTitle, it.trackArtist, it.playedAt, it.durationListenedMs) },
             statistics = stats.map { BackupStatDto(it.trackId, it.playCount, it.totalListenMs, it.lastPlayedAt) },
             customThemes = customThemes,
+            favoriteThemeIds = prefs.favoriteThemeIds.toList(),
         )
         json.encodeToString(MyatoBackupBundle.serializer(), bundle)
     }
@@ -249,6 +251,11 @@ class BackupManager(
 
                 bundle.customThemes.forEach { theme ->
                     database.themeDao().upsertTheme(theme.copy(isBuiltIn = false).toEntity())
+                }
+                bundle.favoriteThemeIds.forEach { favId ->
+                    if (favId !in preferencesStore.preferencesFlow.first().favoriteThemeIds) {
+                        preferencesStore.toggleFavoriteTheme(favId)
+                    }
                 }
 
                 if (!preserveExistingData) {

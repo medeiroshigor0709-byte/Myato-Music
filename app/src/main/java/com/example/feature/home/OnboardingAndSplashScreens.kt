@@ -218,7 +218,7 @@ fun OnboardingScreen(
                 shape = RoundedCornerShape(27.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = colors.primary,
-                    contentColor = Color.Black,
+                    contentColor = colors.onPrimary,
                 ),
             ) {
                 Text(
@@ -382,7 +382,7 @@ fun PermissionsScreen(
                         .height(54.dp)
                         .testTag("grant_permissions_button"),
                     shape = RoundedCornerShape(27.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
                 ) {
                     Text(
                         text = if (audioGranted) "Escanear e Entrar" else "Conceder Permissões",

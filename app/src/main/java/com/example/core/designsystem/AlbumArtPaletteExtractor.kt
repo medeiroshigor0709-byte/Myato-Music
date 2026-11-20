@@ -8,14 +8,18 @@ import android.net.Uri
 import android.util.LruCache
 import androidx.compose.ui.graphics.Color
 import androidx.palette.graphics.Palette
+import com.example.domain.models.AnimationMode
 import com.example.domain.models.ExtractedArtPalette
 import com.example.domain.models.MyatoTheme
+import com.example.domain.models.ThemeCategory
+import com.example.domain.models.ThemeGradientStyle
+import com.example.domain.models.WallpaperStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
  * Generates an offline MyatoTheme palette or multi-swatch aurora palette directly from the current
- * track's embedded or MediaStore album art, using bounded downsampling and LRU caching for 60fps UI.
+ * track's embedded art or a user-picked gallery image using bounded downsampling and Palette API.
  */
 object AlbumArtPaletteExtractor {
 
@@ -100,8 +104,57 @@ object AlbumArtPaletteExtractor {
                 id = "custom_palette_${System.currentTimeMillis()}",
                 name = customName,
                 isBuiltIn = false,
+                category = ThemeCategory.CUSTOM,
+                description = "Tema personalizado criado a partir da capa da música.",
             )
 
+        val generated = buildThemeFromBitmap(
+            bitmap = bitmap,
+            baseTheme = baseTheme,
+            customName = customName,
+            preferLight = baseTheme.isLight,
+            wallpaperImagePath = null,
+        )
+        bitmap.recycle()
+        generated
+    }
+
+    suspend fun extractThemeFromImageUri(
+        context: Context,
+        imageUri: Uri,
+        baseTheme: MyatoTheme,
+        customName: String = "Meu Tema da Imagem",
+        preferLight: Boolean = false,
+        persistedWallpaperPath: String? = null,
+    ): MyatoTheme = withContext(Dispatchers.IO) {
+        val bitmap = loadSampledCoverBitmap(context, imageUri.toString(), null, targetMaxDim = 192)
+            ?: return@withContext baseTheme.copy(
+                id = "custom_img_${System.currentTimeMillis()}",
+                name = customName,
+                isBuiltIn = false,
+                category = ThemeCategory.CUSTOM,
+                wallpaperStyle = if (persistedWallpaperPath != null) WallpaperStyle.CUSTOM_IMAGE else baseTheme.wallpaperStyle,
+                wallpaperImagePath = persistedWallpaperPath,
+            )
+
+        val generated = buildThemeFromBitmap(
+            bitmap = bitmap,
+            baseTheme = baseTheme,
+            customName = customName,
+            preferLight = preferLight,
+            wallpaperImagePath = persistedWallpaperPath,
+        )
+        bitmap.recycle()
+        generated
+    }
+
+    private fun buildThemeFromBitmap(
+        bitmap: Bitmap,
+        baseTheme: MyatoTheme,
+        customName: String,
+        preferLight: Boolean,
+        wallpaperImagePath: String?,
+    ): MyatoTheme {
         val palette = Palette.from(bitmap).maximumColorCount(16).generate()
         val primary = palette.vibrantSwatch?.rgb
             ?: palette.lightVibrantSwatch?.rgb
@@ -110,28 +163,46 @@ object AlbumArtPaletteExtractor {
         val secondary = palette.lightVibrantSwatch?.rgb
             ?: palette.mutedSwatch?.rgb
             ?: 0xFFFF9D24.toInt()
+        val accent = palette.darkVibrantSwatch?.rgb
+            ?: palette.lightMutedSwatch?.rgb
+            ?: secondary
+
         val darkMuted = palette.darkMutedSwatch?.rgb
             ?: palette.darkVibrantSwatch?.rgb
             ?: 0xFF101014.toInt()
+        val lightMuted = palette.lightMutedSwatch?.rgb
+            ?: palette.lightVibrantSwatch?.rgb
+            ?: 0xFFF3F5FA.toInt()
 
-        val bgHex = darkenArgb(darkMuted, 0.22f)
-        val altBgHex = darkenArgb(darkMuted, 0.36f)
-        val cardHex = darkenArgb(darkMuted, 0.54f)
+        val bgHex = if (preferLight) mixArgb(lightMuted, 0xFFFFFFFF.toInt(), 0.72f) else darkenArgb(darkMuted, 0.22f)
+        val altBgHex = if (preferLight) mixArgb(lightMuted, 0xFFFFFFFF.toInt(), 0.55f) else darkenArgb(darkMuted, 0.36f)
+        val cardHex = if (preferLight) 0xFFFFFFFFL else darkenArgb(darkMuted, 0.54f)
+        val gradEndHex = if (preferLight) mixArgb(secondary, 0xFFFFFFFF.toInt(), 0.78f) else darkenArgb(primary, 0.26f)
 
-        bitmap.recycle()
-
-        baseTheme.copy(
+        return baseTheme.copy(
             id = "palette_${System.currentTimeMillis()}",
             name = customName,
             isBuiltIn = false,
-            isLight = false,
+            isLight = preferLight,
             primaryColorHex = primary.toLong() and 0xFFFFFFFFL,
             secondaryColorHex = secondary.toLong() and 0xFFFFFFFFL,
+            accentColorHex = accent.toLong() and 0xFFFFFFFFL,
+            buttonColorHex = primary.toLong() and 0xFFFFFFFFL,
+            iconColorHex = if (preferLight) (primary.toLong() and 0xFFFFFFFFL) else (secondary.toLong() and 0xFFFFFFFFL),
+            borderColorHex = secondary.toLong() and 0xFFFFFFFFL,
             backgroundColorHex = bgHex,
             altBackgroundColorHex = altBgHex,
             cardColorHex = cardHex,
-            textColorHex = 0xFFFFFFFFL,
-            secondaryTextColorHex = 0xFFB8BCC6L,
+            gradientEndColorHex = gradEndHex,
+            textColorHex = if (preferLight) 0xFF12151FL else 0xFFFFFFFFL,
+            secondaryTextColorHex = if (preferLight) 0xFF566075L else 0xFFB8BCC6L,
+            category = ThemeCategory.CUSTOM,
+            description = "Tema criado com cores extraídas automaticamente da imagem.",
+            gradientStyle = ThemeGradientStyle.DIAGONAL,
+            wallpaperStyle = if (wallpaperImagePath != null) WallpaperStyle.CUSTOM_IMAGE else baseTheme.wallpaperStyle,
+            wallpaperImagePath = wallpaperImagePath,
+            wallpaperDimAlpha = if (wallpaperImagePath != null) 0.42f else baseTheme.wallpaperDimAlpha,
+            animationMode = if (baseTheme.animationMode == AnimationMode.BATTERY_SAVER) AnimationMode.REDUCED else baseTheme.animationMode,
         )
     }
 
@@ -183,8 +254,8 @@ object AlbumArtPaletteExtractor {
     private fun calculateInSampleSize(width: Int, height: Int, maxDim: Int): Int {
         var inSampleSize = 1
         if (width > maxDim || height > maxDim) {
-            var halfW = width / 2
-            var halfH = height / 2
+            val halfW = width / 2
+            val halfH = height / 2
             while ((halfW / inSampleSize) >= maxDim && (halfH / inSampleSize) >= maxDim) {
                 inSampleSize *= 2
             }
@@ -199,5 +270,14 @@ object AlbumArtPaletteExtractor {
         val argb = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
         return argb.toLong() and 0xFFFFFFFFL
     }
-}
 
+    private fun mixArgb(colorA: Int, colorB: Int, weightB: Float): Long {
+        val wB = weightB.coerceIn(0f, 1f)
+        val wA = 1f - wB
+        val r = (((colorA shr 16 and 0xFF) * wA) + ((colorB shr 16 and 0xFF) * wB)).toInt().coerceIn(0, 255)
+        val g = (((colorA shr 8 and 0xFF) * wA) + ((colorB shr 8 and 0xFF) * wB)).toInt().coerceIn(0, 255)
+        val b = (((colorA and 0xFF) * wA) + ((colorB and 0xFF) * wB)).toInt().coerceIn(0, 255)
+        val argb = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+        return argb.toLong() and 0xFFFFFFFFL
+    }
+}

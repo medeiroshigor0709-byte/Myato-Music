@@ -54,18 +54,22 @@ class MyatoUnitTests {
     }
 
     @Test
-    fun `built in themes include all 12 mandatory themes with official Midnight Orange palette`() {
+    fun `built in themes include all 50 mandatory themes across 10 categories with official Myato Original palette`() {
         val all = BuiltInThemes.all
-        assertEquals(12, all.size)
-        val names = all.map { it.name }.toSet()
-        val expected = setOf(
-            "Midnight Orange", "AMOLED Black", "Neon Galaxy", "Cyberpunk",
-            "Royal Gold", "Pure Light", "Ocean Blue", "Forest Green",
-            "Crimson Red", "Glass", "Purple Night", "Arctic Silver",
-        )
-        assertEquals(expected, names)
+        assertEquals(50, all.size)
+        val nonCustomCategories = com.example.domain.models.ThemeCategory.entries.filter {
+            it != com.example.domain.models.ThemeCategory.CUSTOM
+        }
+        assertEquals(10, nonCustomCategories.size)
+        nonCustomCategories.forEach { cat ->
+            val inCat = all.filter { it.category == cat }
+            assertEquals("Category ${cat.displayName} should have 5 themes", 5, inCat.size)
+        }
+        assertEquals(50, all.map { it.id }.toSet().size)
+        assertEquals(50, all.map { it.name }.toSet().size)
 
         val official = BuiltInThemes.MidnightOrange
+        assertEquals("Myato Original", official.name)
         assertEquals(0xFFFF8500L, official.primaryColorHex)
         assertEquals(0xFFFF9D24L, official.secondaryColorHex)
         assertEquals(0xFF000000L, official.backgroundColorHex)

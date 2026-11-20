@@ -111,6 +111,11 @@ fun PlayerAnimatedBackground(
             .fillMaxSize()
             .background(colors.background),
     ) {
+        com.example.core.designsystem.ThemeWallpaperLayer(
+            colors = colors,
+            overlayStrength = 0.72f,
+            modifier = Modifier.fillMaxSize(),
+        )
         Crossfade(
             targetState = style,
             animationSpec = tween(durationMillis = crossfadeDuration),
@@ -153,6 +158,17 @@ fun PlayerAnimatedBackground(
                     )
                 }
             }
+        }
+        if (colors.animationType != com.example.domain.models.ThemeAnimationType.NONE && motion.isAnimationsActive) {
+            com.example.core.designsystem.ThemeParticleOverlay(
+                animationType = colors.animationType,
+                primaryColor = colors.primary,
+                secondaryColor = colors.secondary,
+                accentColor = colors.accent,
+                themeAnimationMode = colors.animationMode,
+                intensityOverride = motion.effectiveIntensity * 0.8f,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }

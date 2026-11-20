@@ -1,5 +1,6 @@
 package com.example.presentation
 
+import android.content.Intent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -71,12 +72,16 @@ import com.example.core.designsystem.LocalMyatoColors
 import com.example.core.designsystem.MiniPlayerBar
 import com.example.core.designsystem.MyatoMusicTheme
 import com.example.core.designsystem.SlantedStripesTransitionOverlay
+import com.example.core.designsystem.ThemeParticleOverlay
+import com.example.core.designsystem.ThemeWallpaperLayer
 import com.example.core.designsystem.TrackContextMenuSheet
 import com.example.core.designsystem.TrackDetailsDialog
 import com.example.core.designsystem.rememberMotionEnvironmentState
 import com.example.core.storage.TrackShareAndDeleteHelper
 import com.example.domain.models.MusicTrack
 import com.example.domain.models.QueueOriginType
+import com.example.domain.models.ThemeAnimationIntensity
+import com.example.domain.models.ThemeCreationMode
 import com.example.feature.equalizer.EqualizerScreen
 import com.example.feature.equalizer.SleepTimerScreen
 import com.example.feature.filemanager.FileManagerScreen
@@ -105,6 +110,7 @@ import com.example.feature.themes.FontPreviewScreen
 import com.example.feature.themes.FontSettingsScreen
 import com.example.feature.themes.ThemeCenterScreen
 import com.example.feature.themes.ThemeEditorScreen
+import com.example.feature.themes.ThemePreviewScreen
 import com.example.presentation.navigation.MyatoRoute
 import kotlinx.coroutines.flow.flowOf
 
@@ -192,6 +198,12 @@ fun MyatoRootApp(
         }
     }
 
+    LaunchedEffect(allThemes.size, preferences.themeAutoScheduleMode) {
+        if (allThemes.isNotEmpty()) {
+            viewModel.evaluateAutoThemeSchedule()
+        }
+    }
+
     val motionSettings = rememberMotionEnvironmentState(
         preferences = preferences,
         themeAnimationMode = activeTheme.animationMode,
@@ -205,16 +217,19 @@ fun MyatoRootApp(
             activeGeneralFontId = preferences.activeGeneralFontId,
             activeDecorativeFontId = preferences.activeDecorativeFontId,
             customFonts = preferences.customFonts,
+            animateTransitions = true,
         ) {
             val colors = LocalMyatoColors.current
             val navBackStack by navController.currentBackStackEntryAsState()
             val currentDestination = navBackStack?.destination
             val currentRouteKey = currentDestination?.route ?: ""
 
+        val isFullPlayer = currentDestination?.hasRoute<MyatoRoute.FullPlayer>() == true
+        val isPreviewRoute = currentDestination?.hasRoute<MyatoRoute.ThemePreview>() == true
         val isChromeless = currentDestination?.hasRoute<MyatoRoute.Splash>() == true ||
             currentDestination?.hasRoute<MyatoRoute.Onboarding>() == true ||
             currentDestination?.hasRoute<MyatoRoute.Permissions>() == true ||
-            currentDestination?.hasRoute<MyatoRoute.FullPlayer>() == true
+            isFullPlayer
 
         val topItems = remember {
             listOf(
@@ -231,12 +246,22 @@ fun MyatoRootApp(
                 .fillMaxSize()
                 .background(colors.background),
         ) {
+            ThemeWallpaperLayer(colors = colors, overlayStrength = 0.72f)
+            if (!isChromeless && !isPreviewRoute) {
+                ThemeParticleOverlay(
+                    animationType = colors.animationType,
+                    primaryColor = colors.primary,
+                    secondaryColor = colors.secondary,
+                    accentColor = colors.accent,
+                    themeAnimationMode = activeTheme.animationMode,
+                )
+            }
             val useRail = !isChromeless && maxWidth >= 600.dp
 
             Row(modifier = Modifier.fillMaxSize()) {
                 if (useRail) {
                     NavigationRail(
-                        containerColor = colors.altBackground,
+                        containerColor = colors.altSurfaceColor(),
                         modifier = Modifier.fillMaxHeight(),
                     ) {
                         topItems.forEach { item ->
@@ -264,7 +289,7 @@ fun MyatoRootApp(
                                 },
                                 label = { Text(item.label) },
                                 colors = NavigationRailItemDefaults.colors(
-                                    selectedIconColor = Color.Black,
+                                    selectedIconColor = colors.onPrimary,
                                     selectedTextColor = colors.primary,
                                     indicatorColor = colors.primary,
                                     unselectedIconColor = colors.textSecondary,
@@ -277,7 +302,7 @@ fun MyatoRootApp(
                 }
 
                 Scaffold(
-                    containerColor = colors.background,
+                    containerColor = Color.Transparent,
                     contentWindowInsets = WindowInsets.safeDrawing,
                     snackbarHost = { SnackbarHost(snackbarHostState) },
                     bottomBar = {
@@ -285,7 +310,7 @@ fun MyatoRootApp(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(colors.altBackground)
+                                    .background(colors.altSurfaceColor())
                                     .navigationBarsPadding(),
                             ) {
                                 MiniPlayerBar(
@@ -300,7 +325,7 @@ fun MyatoRootApp(
                                 )
                                 if (!useRail) {
                                     NavigationBar(
-                                        containerColor = colors.altBackground,
+                                        containerColor = Color.Transparent,
                                         contentColor = colors.textPrimary,
                                     ) {
                                         topItems.forEach { item ->
@@ -328,7 +353,7 @@ fun MyatoRootApp(
                                                 },
                                                 label = { Text(item.label, maxLines = 1) },
                                                 colors = NavigationBarItemDefaults.colors(
-                                                    selectedIconColor = Color.Black,
+                                                    selectedIconColor = colors.onPrimary,
                                                     selectedTextColor = colors.primary,
                                                     indicatorColor = colors.primary,
                                                     unselectedIconColor = colors.textSecondary,
@@ -797,16 +822,74 @@ fun MyatoRootApp(
                             }
 
                             composable<MyatoRoute.ThemeCenter> {
+                                val currentAnimIntensity = remember(preferences.animationsDisabled, preferences.visualizerAnimationIntensity) {
+                                    ThemeAnimationIntensity.fromFactor(
+                                        factor = preferences.visualizerAnimationIntensity,
+                                        disabled = preferences.animationsDisabled,
+                                    )
+                                }
                                 ThemeCenterScreen(
                                     themes = allThemes,
                                     activeThemeId = activeTheme.id,
                                     onSelectTheme = { viewModel.selectTheme(it) },
-                                    onOpenEditor = { tid -> navController.navigate(MyatoRoute.ThemeEditor(tid)) },
+                                    onOpenEditor = { tid -> navController.navigate(MyatoRoute.ThemeEditor(tid, ThemeCreationMode.FROM_THEME.name)) },
                                     onDuplicateTheme = { t, name -> viewModel.duplicateTheme(t, name) },
                                     onDeleteCustomTheme = { viewModel.deleteCustomTheme(it) },
                                     onImportThemeJson = { raw -> viewModel.importThemeJson(raw) },
                                     activeFontName = activeFontSummary,
                                     onOpenFontSettings = { navController.navigate(MyatoRoute.FontSettings) },
+                                    favoriteThemeIds = preferences.favoriteThemeIds,
+                                    themeHistory = preferences.themeHistory,
+                                    autoScheduleMode = preferences.themeAutoScheduleMode,
+                                    autoDayThemeId = preferences.themeAutoDayThemeId,
+                                    autoNightThemeId = preferences.themeAutoNightThemeId,
+                                    currentAnimationIntensity = currentAnimIntensity,
+                                    onOpenPreview = { tid -> navController.navigate(MyatoRoute.ThemePreview(tid)) },
+                                    onOpenEditorWithMode = { tid, mode ->
+                                        navController.navigate(MyatoRoute.ThemeEditor(tid, mode.name))
+                                    },
+                                    onToggleFavoriteTheme = { tid -> viewModel.toggleFavoriteTheme(tid) },
+                                    onApplyRandomTheme = { viewModel.applyRandomTheme() },
+                                    onApplySeasonalTheme = { viewModel.applySeasonalTheme() },
+                                    onConfigureAutoSchedule = { mode, dayId, nightId ->
+                                        viewModel.configureThemeAutoSchedule(mode, dayId, nightId)
+                                    },
+                                    onSelectAnimationIntensity = { intensity -> viewModel.setThemeAnimationIntensity(intensity) },
+                                    onRenameCustomTheme = { tid, newName -> viewModel.renameCustomTheme(tid, newName) },
+                                    onShareTheme = { theme ->
+                                        val shareIntent = viewModel.createShareThemeIntent(theme)
+                                        context.startActivity(Intent.createChooser(shareIntent, "Compartilhar tema ${theme.name}"))
+                                    },
+                                )
+                            }
+
+                            composable<MyatoRoute.ThemePreview> { entry ->
+                                val route = entry.toRoute<MyatoRoute.ThemePreview>()
+                                val resolvedId = BuiltInThemes.resolveThemeId(route.themeId)
+                                val previewTheme = remember(allThemes, resolvedId) {
+                                    allThemes.firstOrNull { it.id == resolvedId || it.id == route.themeId }
+                                        ?: BuiltInThemes.findByIdOrAlias(route.themeId)
+                                        ?: activeTheme
+                                }
+                                ThemePreviewScreen(
+                                    previewTheme = previewTheme,
+                                    isActiveTheme = previewTheme.id == activeTheme.id,
+                                    isFavorite = previewTheme.id in preferences.favoriteThemeIds,
+                                    activeGeneralFontId = preferences.activeGeneralFontId,
+                                    activeDecorativeFontId = preferences.activeDecorativeFontId,
+                                    customFonts = preferences.customFonts,
+                                    onApplyTheme = { viewModel.selectTheme(previewTheme.id) },
+                                    onToggleFavorite = { viewModel.toggleFavoriteTheme(previewTheme.id) },
+                                    onOpenInStudio = {
+                                        navController.navigate(
+                                            MyatoRoute.ThemeEditor(previewTheme.id, ThemeCreationMode.FROM_THEME.name)
+                                        )
+                                    },
+                                    onShareTheme = {
+                                        val shareIntent = viewModel.createShareThemeIntent(previewTheme)
+                                        context.startActivity(Intent.createChooser(shareIntent, "Compartilhar tema ${previewTheme.name}"))
+                                    },
+                                    onBack = { navController.popBackStack() },
                                 )
                             }
 
@@ -853,14 +936,35 @@ fun MyatoRootApp(
 
                             composable<MyatoRoute.ThemeEditor> { entry ->
                                 val route = entry.toRoute<MyatoRoute.ThemeEditor>()
-                                val source = allThemes.firstOrNull { it.id == route.sourceThemeId } ?: BuiltInThemes.MidnightOrange
+                                val resolvedId = BuiltInThemes.resolveThemeId(route.sourceThemeId)
+                                val source = allThemes.firstOrNull { it.id == resolvedId || it.id == route.sourceThemeId }
+                                    ?: BuiltInThemes.findByIdOrAlias(route.sourceThemeId)
+                                    ?: BuiltInThemes.MidnightOrange
+                                val creationMode = ThemeCreationMode.entries.firstOrNull { it.name == route.mode }
+                                    ?: ThemeCreationMode.FROM_THEME
                                 ThemeEditorScreen(
                                     sourceTheme = source,
+                                    creationMode = creationMode,
                                     onBack = { navController.popBackStack() },
                                     onSaveTheme = { viewModel.saveCustomTheme(it) },
                                     onGenerateFromCover = { cb -> viewModel.generateThemeFromCurrentCover(cb) },
                                     onExportThemeJson = { t -> viewModel.exportThemeJson(t) },
                                     onNotify = { msg -> viewModel.showStatus(msg) },
+                                    onCreateFromGalleryImage = { uri, attachWallpaper, customName, preferLight, baseTheme, onDone ->
+                                        viewModel.createThemeFromGalleryImage(
+                                            imageUri = uri,
+                                            attachAsWallpaper = attachWallpaper,
+                                            customName = customName,
+                                            preferLight = preferLight,
+                                            baseTheme = baseTheme,
+                                            onGenerated = onDone,
+                                        )
+                                    },
+                                    onPersistWallpaperUri = { uri, cb -> viewModel.persistWallpaperImage(uri, cb) },
+                                    onShareTheme = { theme ->
+                                        val shareIntent = viewModel.createShareThemeIntent(theme)
+                                        context.startActivity(Intent.createChooser(shareIntent, "Compartilhar tema ${theme.name}"))
+                                    },
                                 )
                             }
 
@@ -908,6 +1012,9 @@ fun MyatoRootApp(
                                     onSetAnimationsDisabled = { viewModel.setAnimationsDisabled(it) },
                                     onSetReduceMotion = { viewModel.setReduceMotion(it) },
                                     onSetReduceEffectsOnLowBattery = { viewModel.setReduceEffectsOnLowBattery(it) },
+                                    activeThemeName = activeTheme.name,
+                                    onOpenMyatoThemes = { navController.navigate(MyatoRoute.ThemeCenter) },
+                                    onSelectAnimationIntensity = { viewModel.setThemeAnimationIntensity(it) },
                                 )
                             }
 

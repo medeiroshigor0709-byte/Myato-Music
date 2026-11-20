@@ -46,6 +46,8 @@ import com.example.domain.models.QueueOriginType
 import com.example.domain.models.SearchFilterMode
 import com.example.domain.models.SmartSearchResult
 import com.example.domain.models.SmartSelectionCriteria
+import com.example.domain.models.ThemeAnimationIntensity
+import com.example.domain.models.ThemeAutoScheduleMode
 import com.example.domain.models.TrackSortOrder
 import com.example.widgets.WidgetUpdateHelper
 import kotlinx.coroutines.flow.Flow
@@ -769,18 +771,77 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    // Themes & Editor
+    // Themes & Studio
     fun selectTheme(themeId: String) {
         viewModelScope.launch {
-            app.themeRepository.selectTheme(themeId)
-            _statusMessage.value = "Tema aplicado."
+            val themeName = allThemes.value.firstOrNull { it.id == BuiltInThemes.resolveThemeId(themeId) }?.name
+            app.themeRepository.selectTheme(themeId, themeName)
+            _statusMessage.value = if (themeName != null) "Tema \"$themeName\" aplicado!" else "Tema aplicado!"
+        }
+    }
+
+    fun toggleFavoriteTheme(themeId: String) {
+        viewModelScope.launch {
+            app.themeRepository.toggleFavoriteTheme(themeId)
+        }
+    }
+
+    fun applyRandomTheme() {
+        viewModelScope.launch {
+            val picked = app.themeRepository.pickRandomTheme(allThemes.value, activeTheme.value.id)
+            app.themeRepository.selectTheme(picked.id, picked.name)
+            _statusMessage.value = "Tema aleatório aplicado: \"${picked.name}\""
+        }
+    }
+
+    fun applySeasonalTheme() {
+        viewModelScope.launch {
+            val picked = app.themeRepository.pickSeasonalTheme(allThemes.value)
+            app.themeRepository.selectTheme(picked.id, picked.name)
+            _statusMessage.value = "Tema sazonal aplicado: \"${picked.name}\""
+        }
+    }
+
+    fun configureThemeAutoSchedule(
+        mode: ThemeAutoScheduleMode,
+        dayThemeId: String,
+        nightThemeId: String,
+    ) {
+        viewModelScope.launch {
+            app.preferencesStore.setThemeAutoSchedule(mode, dayThemeId, nightThemeId)
+            val updatedPrefs = preferences.value.copy(
+                themeAutoScheduleMode = mode,
+                themeAutoDayThemeId = dayThemeId,
+                themeAutoNightThemeId = nightThemeId,
+            )
+            app.themeRepository.evaluateAutoScheduleIfNeeded(allThemes.value, updatedPrefs)
+            _statusMessage.value = "Troca automática definida: ${mode.label}."
+        }
+    }
+
+    fun evaluateAutoThemeSchedule() {
+        viewModelScope.launch {
+            app.themeRepository.evaluateAutoScheduleIfNeeded(allThemes.value, preferences.value)
+        }
+    }
+
+    fun setThemeAnimationIntensity(intensity: ThemeAnimationIntensity) {
+        viewModelScope.launch {
+            app.preferencesStore.setThemeAnimationIntensity(intensity)
         }
     }
 
     fun saveCustomTheme(theme: MyatoTheme) {
         viewModelScope.launch {
-            app.themeRepository.saveCustomTheme(theme)
-            _statusMessage.value = "Tema \"${theme.name}\" salvo e aplicado."
+            val saved = app.themeRepository.saveCustomTheme(theme)
+            _statusMessage.value = "Tema \"${saved.name}\" salvo e aplicado."
+        }
+    }
+
+    fun renameCustomTheme(themeId: String, newName: String) {
+        viewModelScope.launch {
+            app.themeRepository.renameCustomTheme(themeId, newName)
+            _statusMessage.value = "Tema renomeado para \"$newName\"."
         }
     }
 
@@ -812,13 +873,45 @@ class MyatoMainViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun createThemeFromGalleryImage(
+        imageUri: Uri,
+        attachAsWallpaper: Boolean,
+        customName: String,
+        preferLight: Boolean,
+        baseTheme: MyatoTheme,
+        onGenerated: (MyatoTheme) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val savedPath = if (attachAsWallpaper) app.themeRepository.persistGalleryWallpaper(imageUri) else null
+            val extracted = AlbumArtPaletteExtractor.extractThemeFromImageUri(
+                context = app,
+                imageUri = imageUri,
+                baseTheme = baseTheme,
+                customName = customName.ifBlank { "Tema da Imagem" },
+                preferLight = preferLight,
+                persistedWallpaperPath = savedPath,
+            )
+            onGenerated(extracted)
+        }
+    }
+
+    fun persistWallpaperImage(imageUri: Uri, onSaved: (String?) -> Unit) {
+        viewModelScope.launch {
+            val path = app.themeRepository.persistGalleryWallpaper(imageUri)
+            onSaved(path)
+        }
+    }
+
     fun exportThemeJson(theme: MyatoTheme): String = app.themeRepository.exportThemeJson(theme)
+
+    fun createShareThemeIntent(theme: MyatoTheme): android.content.Intent =
+        app.themeRepository.createShareThemeIntent(theme)
 
     fun importThemeJson(rawJson: String) {
         viewModelScope.launch {
             val res = app.themeRepository.importThemeJson(rawJson)
             _statusMessage.value = res.fold(
-                onSuccess = { "Tema \"${it.name}\" importado." },
+                onSuccess = { "Tema \"${it.name}\" importado!" },
                 onFailure = { "JSON de tema inválido: ${it.localizedMessage}" },
             )
         }

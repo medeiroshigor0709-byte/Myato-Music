@@ -432,8 +432,8 @@ class MyatoVisualAnimationsTests {
     }
 
     @Test
-    fun `player animated background renders safely across all 12 themes and compact screen width`() {
-        assertEquals(12, BuiltInThemes.all.size)
+    fun `player animated background renders safely across all 50 themes and compact screen width`() {
+        assertEquals(50, BuiltInThemes.all.size)
         var themeIndex by mutableStateOf(0)
 
         composeRule.setContent {

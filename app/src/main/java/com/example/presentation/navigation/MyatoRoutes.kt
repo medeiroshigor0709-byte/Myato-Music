@@ -34,7 +34,8 @@ sealed interface MyatoRoute {
     @Serializable data object Equalizer : MyatoRoute
     @Serializable data object SleepTimer : MyatoRoute
     @Serializable data object Statistics : MyatoRoute
-    @Serializable data class ThemeEditor(val sourceThemeId: String) : MyatoRoute
+    @Serializable data class ThemePreview(val themeId: String) : MyatoRoute
+    @Serializable data class ThemeEditor(val sourceThemeId: String, val mode: String = "FROM_THEME") : MyatoRoute
     @Serializable data object FontSettings : MyatoRoute
     @Serializable data class FontPreview(val fontId: String) : MyatoRoute
     @Serializable data object WidgetsShortcuts : MyatoRoute

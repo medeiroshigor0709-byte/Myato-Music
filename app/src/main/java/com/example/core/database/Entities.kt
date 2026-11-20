@@ -224,6 +224,7 @@ data class ThemeEntity(
     val animationMode: String = "FULL",
     val playerAppearance: String = "CINEMATIC",
     val createdAt: Long = System.currentTimeMillis(),
+    val extendedConfigJson: String = "{}",
 )
 
 @Entity(

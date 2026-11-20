@@ -88,7 +88,7 @@ fun FontPreviewScreen(
     onBack: () -> Unit,
 ) {
     val colors = LocalMyatoColors.current
-    val onPrimary = if (colors.isLight) Color.White else Color.Black
+    val onPrimary = colors.onPrimary
 
     val defaultTarget = remember(fontOption.fontCategory) {
         when (fontOption.fontCategory) {
@@ -112,7 +112,6 @@ fun FontPreviewScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("font_preview_screen"),
     ) {
         Row(

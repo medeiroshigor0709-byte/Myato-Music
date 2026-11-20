@@ -1091,7 +1091,7 @@ fun PlayerSettingsSheet(
                             label = { Text(label) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = colors.primary,
-                                selectedLabelColor = Color.Black,
+                                selectedLabelColor = colors.onPrimary,
                             ),
                         )
                     }
@@ -1116,7 +1116,7 @@ fun PlayerSettingsSheet(
                         label = { Text("$count faixas") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = colors.primary,
-                            selectedLabelColor = Color.Black,
+                            selectedLabelColor = colors.onPrimary,
                         ),
                     )
                 }

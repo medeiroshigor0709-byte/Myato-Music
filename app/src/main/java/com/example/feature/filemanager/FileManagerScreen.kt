@@ -100,7 +100,6 @@ fun FileManagerScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("file_manager_screen"),
     ) {
         Row(

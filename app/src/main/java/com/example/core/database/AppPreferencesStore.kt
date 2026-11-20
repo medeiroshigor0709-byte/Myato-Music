@@ -17,6 +17,9 @@ import com.example.domain.models.AppFontOption
 import com.example.domain.models.FontApplyTarget
 import com.example.domain.models.HeadsetButtonMapping
 import com.example.domain.models.PlayerVisualBackgroundStyle
+import com.example.domain.models.ThemeAnimationIntensity
+import com.example.domain.models.ThemeAutoScheduleMode
+import com.example.domain.models.ThemeUsageHistoryEntry
 import com.example.domain.models.TrackSortOrder
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -63,6 +66,12 @@ data class AppUserPreferences(
     val favoriteFontIds: Set<String> = emptySet(),
     val recentFontIds: List<String> = emptyList(),
     val customFonts: List<AppFontOption> = emptyList(),
+    val favoriteThemeIds: Set<String> = emptySet(),
+    val themeHistory: List<ThemeUsageHistoryEntry> = emptyList(),
+    val themeAutoScheduleMode: ThemeAutoScheduleMode = ThemeAutoScheduleMode.MANUAL,
+    val themeAutoDayThemeId: String = BuiltInThemes.PureWhite.id,
+    val themeAutoNightThemeId: String = BuiltInThemes.MyatoOriginal.id,
+    val lastAutoThemeSwitchAt: Long = 0L,
 )
 
 class AppPreferencesStore(private val context: Context) {
@@ -104,6 +113,12 @@ class AppPreferencesStore(private val context: Context) {
         val FAVORITE_FONT_IDS = stringSetPreferencesKey("favorite_font_ids")
         val RECENT_FONT_IDS_JSON = stringPreferencesKey("recent_font_ids_json")
         val CUSTOM_FONTS_JSON = stringPreferencesKey("custom_fonts_json")
+        val FAVORITE_THEME_IDS = stringSetPreferencesKey("favorite_theme_ids")
+        val THEME_HISTORY_JSON = stringPreferencesKey("theme_history_json")
+        val THEME_AUTO_SCHEDULE_MODE = stringPreferencesKey("theme_auto_schedule_mode")
+        val THEME_AUTO_DAY_ID = stringPreferencesKey("theme_auto_day_id")
+        val THEME_AUTO_NIGHT_ID = stringPreferencesKey("theme_auto_night_id")
+        val LAST_AUTO_THEME_SWITCH_AT = longPreferencesKey("last_auto_theme_switch_at")
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -114,7 +129,7 @@ class AppPreferencesStore(private val context: Context) {
         val decorativeId = prefs[Keys.ACTIVE_DECORATIVE_FONT_ID] ?: legacyFontId
         AppUserPreferences(
             hasCompletedOnboarding = prefs[Keys.ONBOARDING_DONE] ?: false,
-            activeThemeId = prefs[Keys.ACTIVE_THEME_ID] ?: BuiltInThemes.MidnightOrange.id,
+            activeThemeId = BuiltInThemes.resolveThemeId(prefs[Keys.ACTIVE_THEME_ID]),
             activeQueueId = prefs[Keys.ACTIVE_QUEUE_ID] ?: 1L,
             lastTrackId = prefs[Keys.LAST_TRACK_ID] ?: -1L,
             lastPositionMs = prefs[Keys.LAST_POSITION_MS] ?: 0L,
@@ -149,7 +164,20 @@ class AppPreferencesStore(private val context: Context) {
             favoriteFontIds = prefs[Keys.FAVORITE_FONT_IDS] ?: emptySet(),
             recentFontIds = parseStringList(prefs[Keys.RECENT_FONT_IDS_JSON]),
             customFonts = parseCustomFonts(prefs[Keys.CUSTOM_FONTS_JSON]),
+            favoriteThemeIds = prefs[Keys.FAVORITE_THEME_IDS] ?: emptySet(),
+            themeHistory = parseThemeHistory(prefs[Keys.THEME_HISTORY_JSON]),
+            themeAutoScheduleMode = ThemeAutoScheduleMode.fromName(prefs[Keys.THEME_AUTO_SCHEDULE_MODE]),
+            themeAutoDayThemeId = BuiltInThemes.resolveThemeId(prefs[Keys.THEME_AUTO_DAY_ID] ?: BuiltInThemes.PureWhite.id),
+            themeAutoNightThemeId = BuiltInThemes.resolveThemeId(prefs[Keys.THEME_AUTO_NIGHT_ID] ?: BuiltInThemes.MyatoOriginal.id),
+            lastAutoThemeSwitchAt = prefs[Keys.LAST_AUTO_THEME_SWITCH_AT] ?: 0L,
         )
+    }
+
+    private fun parseThemeHistory(raw: String?): List<ThemeUsageHistoryEntry> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            json.decodeFromString<List<ThemeUsageHistoryEntry>>(raw)
+        }.getOrDefault(emptyList())
     }
 
     private fun parseStringList(raw: String?): List<String> {
@@ -383,6 +411,62 @@ class AppPreferencesStore(private val context: Context) {
             }
             val recents = parseStringList(prefs[Keys.RECENT_FONT_IDS_JSON]).filterNot { it == fontId }
             prefs[Keys.RECENT_FONT_IDS_JSON] = json.encodeToString(recents)
+        }
+    }
+
+    suspend fun toggleFavoriteTheme(themeId: String) {
+        context.myatoDataStore.edit { prefs ->
+            val current = prefs[Keys.FAVORITE_THEME_IDS] ?: emptySet()
+            prefs[Keys.FAVORITE_THEME_IDS] = if (themeId in current) current - themeId else current + themeId
+        }
+    }
+
+    suspend fun recordThemeUsage(themeId: String, themeName: String) {
+        context.myatoDataStore.edit { prefs ->
+            val current = parseThemeHistory(prefs[Keys.THEME_HISTORY_JSON]).filterNot { it.themeId == themeId }
+            val updated = (listOf(ThemeUsageHistoryEntry(themeId, themeName, System.currentTimeMillis())) + current).take(25)
+            prefs[Keys.THEME_HISTORY_JSON] = json.encodeToString(updated)
+        }
+    }
+
+    suspend fun setThemeAutoSchedule(
+        mode: ThemeAutoScheduleMode,
+        dayThemeId: String,
+        nightThemeId: String,
+    ) {
+        context.myatoDataStore.edit { prefs ->
+            prefs[Keys.THEME_AUTO_SCHEDULE_MODE] = mode.name
+            prefs[Keys.THEME_AUTO_DAY_ID] = dayThemeId
+            prefs[Keys.THEME_AUTO_NIGHT_ID] = nightThemeId
+        }
+    }
+
+    suspend fun setLastAutoThemeSwitchAt(timestampMs: Long) {
+        context.myatoDataStore.edit { prefs ->
+            prefs[Keys.LAST_AUTO_THEME_SWITCH_AT] = timestampMs
+        }
+    }
+
+    suspend fun setThemeAnimationIntensity(intensity: ThemeAnimationIntensity) {
+        context.myatoDataStore.edit { prefs ->
+            when (intensity) {
+                ThemeAnimationIntensity.DISABLED -> {
+                    prefs[Keys.ANIMATIONS_DISABLED] = true
+                    prefs[Keys.VISUALIZER_INTENSITY] = 0f
+                }
+                ThemeAnimationIntensity.SOFT -> {
+                    prefs[Keys.ANIMATIONS_DISABLED] = false
+                    prefs[Keys.VISUALIZER_INTENSITY] = ThemeAnimationIntensity.SOFT.factor
+                }
+                ThemeAnimationIntensity.NORMAL -> {
+                    prefs[Keys.ANIMATIONS_DISABLED] = false
+                    prefs[Keys.VISUALIZER_INTENSITY] = ThemeAnimationIntensity.NORMAL.factor
+                }
+                ThemeAnimationIntensity.INTENSE -> {
+                    prefs[Keys.ANIMATIONS_DISABLED] = false
+                    prefs[Keys.VISUALIZER_INTENSITY] = ThemeAnimationIntensity.INTENSE.factor
+                }
+            }
         }
     }
 }

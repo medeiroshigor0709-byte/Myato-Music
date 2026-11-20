@@ -3,6 +3,7 @@ package com.example.data.repository
 import android.content.Context
 import android.net.Uri
 import com.example.core.database.AppPreferencesStore
+import com.example.core.database.AppUserPreferences
 import com.example.core.database.BookmarkEntity
 import com.example.core.database.FavoriteEntity
 import com.example.core.database.MusicNoteEntity
@@ -488,10 +489,11 @@ class QueueRepository(private val database: MyatoDatabase) {
 }
 
 class ThemeRepository(
+    private val context: android.content.Context,
     private val database: MyatoDatabase,
     private val preferencesStore: AppPreferencesStore,
 ) {
-    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true; encodeDefaults = true }
 
     val themesFlow: Flow<List<MyatoTheme>> = database.themeDao().observeThemes().map { list ->
         if (list.isEmpty()) BuiltInThemes.all else list.map { it.toDomain() }
@@ -501,17 +503,39 @@ class ThemeRepository(
         themesFlow,
         preferencesStore.preferencesFlow,
     ) { themes, prefs ->
-        themes.firstOrNull { it.id == prefs.activeThemeId } ?: BuiltInThemes.MidnightOrange
+        val resolvedId = BuiltInThemes.resolveThemeId(prefs.activeThemeId)
+        themes.firstOrNull { it.id == resolvedId }
+            ?: BuiltInThemes.findByIdOrAlias(resolvedId)
+            ?: BuiltInThemes.MidnightOrange
     }
 
-    suspend fun selectTheme(themeId: String) {
-        preferencesStore.setActiveThemeId(themeId)
+    suspend fun selectTheme(themeId: String, themeName: String? = null) {
+        val resolved = BuiltInThemes.resolveThemeId(themeId)
+        val name = themeName
+            ?: database.themeDao().getThemeById(resolved)?.name
+            ?: BuiltInThemes.findByIdOrAlias(resolved)?.name
+            ?: "Tema Myato"
+        preferencesStore.setActiveThemeId(resolved)
+        preferencesStore.recordThemeUsage(resolved, name)
     }
 
-    suspend fun saveCustomTheme(theme: MyatoTheme) {
-        val custom = theme.copy(isBuiltIn = false)
+    suspend fun saveCustomTheme(theme: MyatoTheme): MyatoTheme {
+        val custom = theme.copy(
+            id = theme.id.ifBlank { "custom_${System.currentTimeMillis()}" },
+            isBuiltIn = false,
+            category = com.example.domain.models.ThemeCategory.CUSTOM,
+        )
         database.themeDao().upsertTheme(custom.toEntity())
         preferencesStore.setActiveThemeId(custom.id)
+        preferencesStore.recordThemeUsage(custom.id, custom.name)
+        return custom
+    }
+
+    suspend fun renameCustomTheme(themeId: String, newName: String) {
+        val existing = database.themeDao().getThemeById(themeId)?.toDomain() ?: return
+        if (existing.isBuiltIn) return
+        val clean = newName.trim().ifBlank { existing.name }
+        database.themeDao().upsertTheme(existing.copy(name = clean).toEntity())
     }
 
     suspend fun duplicateTheme(source: MyatoTheme, newName: String): MyatoTheme {
@@ -519,22 +543,110 @@ class ThemeRepository(
             id = "custom_${System.currentTimeMillis()}",
             name = newName.trim().ifBlank { "${source.name} Personalizado" },
             isBuiltIn = false,
+            category = com.example.domain.models.ThemeCategory.CUSTOM,
         )
         database.themeDao().upsertTheme(copy.toEntity())
         return copy
     }
 
     suspend fun deleteCustomTheme(themeId: String) {
+        val existing = database.themeDao().getThemeById(themeId)?.toDomain()
+        existing?.wallpaperImagePath?.let { path ->
+            val f = java.io.File(path)
+            if (f.exists() && path.contains("theme_wallpapers")) {
+                runCatching { f.delete() }
+            }
+        }
         database.themeDao().deleteCustomTheme(themeId)
     }
 
+    suspend fun toggleFavoriteTheme(themeId: String) {
+        preferencesStore.toggleFavoriteTheme(BuiltInThemes.resolveThemeId(themeId))
+    }
+
+    fun pickRandomTheme(themes: List<MyatoTheme>, currentThemeId: String): MyatoTheme {
+        val candidates = themes.filterNot { it.id == currentThemeId }
+        return if (candidates.isNotEmpty()) candidates.random() else (themes.firstOrNull() ?: BuiltInThemes.MidnightOrange)
+    }
+
+    fun pickSeasonalTheme(themes: List<MyatoTheme>, monthZeroIndexed: Int = java.util.Calendar.getInstance().get(java.util.Calendar.MONTH)): MyatoTheme {
+        // Southern hemisphere & general recognizable seasonal affinity
+        val targetTag = when (monthZeroIndexed) {
+            8, 9, 10 -> "Primavera"
+            11, 0, 1 -> "Verão"
+            2, 3, 4 -> "Outono"
+            else -> "Inverno"
+        }
+        val matches = themes.filter { it.seasonalTag.equals(targetTag, ignoreCase = true) }
+        return matches.firstOrNull() ?: themes.firstOrNull { !it.seasonalTag.isNullOrBlank() } ?: BuiltInThemes.SakuraDream
+    }
+
+    suspend fun evaluateAutoScheduleIfNeeded(themes: List<MyatoTheme>, prefs: AppUserPreferences): MyatoTheme? {
+        if (themes.isEmpty()) return null
+        val now = System.currentTimeMillis()
+        val cal = java.util.Calendar.getInstance()
+        val targetId: String? = when (prefs.themeAutoScheduleMode) {
+            com.example.domain.models.ThemeAutoScheduleMode.MANUAL -> null
+            com.example.domain.models.ThemeAutoScheduleMode.DAY_NIGHT -> {
+                val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+                if (hour in 6..17) prefs.themeAutoDayThemeId else prefs.themeAutoNightThemeId
+            }
+            com.example.domain.models.ThemeAutoScheduleMode.DAILY_RANDOM -> {
+                val dayMillis = 24L * 60L * 60L * 1000L
+                if (now - prefs.lastAutoThemeSwitchAt >= dayMillis) {
+                    pickRandomTheme(themes, prefs.activeThemeId).id
+                } else null
+            }
+            com.example.domain.models.ThemeAutoScheduleMode.HOURLY_RANDOM -> {
+                val hourMillis = 60L * 60L * 1000L
+                if (now - prefs.lastAutoThemeSwitchAt >= hourMillis) {
+                    pickRandomTheme(themes, prefs.activeThemeId).id
+                } else null
+            }
+            com.example.domain.models.ThemeAutoScheduleMode.SEASONAL -> {
+                pickSeasonalTheme(themes, cal.get(java.util.Calendar.MONTH)).id
+            }
+        }
+        if (targetId != null && targetId != prefs.activeThemeId) {
+            val resolved = themes.firstOrNull { it.id == BuiltInThemes.resolveThemeId(targetId) }
+                ?: BuiltInThemes.findByIdOrAlias(targetId)
+            if (resolved != null) {
+                selectTheme(resolved.id, resolved.name)
+                preferencesStore.setLastAutoThemeSwitchAt(now)
+                return resolved
+            }
+        }
+        return null
+    }
+
+    suspend fun persistGalleryWallpaper(uri: android.net.Uri): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            val dir = java.io.File(context.filesDir, "theme_wallpapers").apply { if (!exists()) mkdirs() }
+            val dest = java.io.File(dir, "wallpaper_${System.currentTimeMillis()}.jpg")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            } ?: return@withContext null
+            if (dest.exists() && dest.length() > 0L) dest.absolutePath else null
+        }.getOrNull()
+    }
+
     fun exportThemeJson(theme: MyatoTheme): String = json.encodeToString(MyatoTheme.serializer(), theme)
+
+    fun createShareThemeIntent(theme: MyatoTheme): android.content.Intent {
+        val payload = exportThemeJson(theme)
+        return android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "Tema Myato Themes: ${theme.name}")
+            putExtra(android.content.Intent.EXTRA_TEXT, payload)
+        }
+    }
 
     suspend fun importThemeJson(rawJson: String): Result<MyatoTheme> = runCatching {
         val parsed = json.decodeFromString(MyatoTheme.serializer(), rawJson)
         val imported = parsed.copy(
             id = "imported_${System.currentTimeMillis()}",
             isBuiltIn = false,
+            category = com.example.domain.models.ThemeCategory.CUSTOM,
         )
         database.themeDao().upsertTheme(imported.toEntity())
         imported

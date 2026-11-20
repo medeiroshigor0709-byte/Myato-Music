@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +44,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -103,7 +105,6 @@ fun StatisticsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("statistics_screen"),
     ) {
         Row(modifier = Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -215,7 +216,6 @@ fun WidgetsShortcutsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("widgets_screen"),
     ) {
         SimpleHeader(title = "Widgets e Atalhos", onBack = onBack)
@@ -325,7 +325,6 @@ fun BackupScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("backup_screen"),
     ) {
         SimpleHeader(title = "Backup e Restauração", onBack = onBack)
@@ -339,7 +338,7 @@ fun BackupScreen(
             Button(
                 onClick = { exportLauncher.launch("myato_backup_${System.currentTimeMillis()}.json") },
                 modifier = Modifier.fillMaxWidth().height(52.dp).testTag("export_backup_button"),
-                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
             ) {
                 Icon(Icons.Rounded.Backup, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
@@ -471,15 +470,23 @@ fun SettingsScreen(
     onSetAnimationsDisabled: (Boolean) -> Unit = {},
     onSetReduceMotion: (Boolean) -> Unit = {},
     onSetReduceEffectsOnLowBattery: (Boolean) -> Unit = {},
+    activeThemeName: String = "Myato Original",
+    onOpenMyatoThemes: () -> Unit = {},
+    onSelectAnimationIntensity: (com.example.domain.models.ThemeAnimationIntensity) -> Unit = {},
 ) {
     val colors = LocalMyatoColors.current
     var showFormatsDialog by remember { mutableStateOf(false) }
     var showVisualStyleSheet by remember { mutableStateOf(false) }
+    val currentThemeIntensity = remember(preferences.animationsDisabled, preferences.visualizerAnimationIntensity) {
+        com.example.domain.models.ThemeAnimationIntensity.fromFactor(
+            factor = preferences.visualizerAnimationIntensity,
+            disabled = preferences.animationsDisabled,
+        )
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp)
             .testTag("settings_screen"),
@@ -495,6 +502,61 @@ fun SettingsScreen(
         }
         Spacer(Modifier.height(12.dp))
 
+        // Seção Personalização (Configurações -> Personalização -> Myato Themes)
+        Card(
+            colors = CardDefaults.cardColors(containerColor = colors.cardSurfaceColor()),
+            border = colors.borderStroke(),
+            shape = colors.resolveCardShape(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("settings_personalization_section"),
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text("Personalização", style = MaterialTheme.typography.titleMedium, color = colors.primary, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                SettingActionRow(
+                    title = "Myato Themes",
+                    subtitle = "Ativo: $activeThemeName • 50+ temas, papéis de parede e Studio",
+                    onClick = onOpenMyatoThemes,
+                    modifier = Modifier.testTag("settings_myato_themes_row"),
+                )
+                SettingActionRow(
+                    title = "Fontes e tipografia",
+                    subtitle = "Catálogo de fontes • Ativa: $activeFontName",
+                    onClick = onOpenFontSettings,
+                    modifier = Modifier.testTag("settings_font_row"),
+                )
+                SettingActionRow(
+                    title = "Estilo visual da reprodução",
+                    subtitle = "${preferences.playerVisualStyle.title} • Transições e efeitos de movimento",
+                    onClick = { showVisualStyleSheet = true },
+                    modifier = Modifier.testTag("settings_visual_style_row"),
+                )
+                Spacer(Modifier.height(6.dp))
+                Text("Animações dos Temas", style = MaterialTheme.typography.labelLarge, color = colors.textPrimary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .testTag("settings_animation_intensity_row"),
+                ) {
+                    com.example.domain.models.ThemeAnimationIntensity.entries.forEach { level ->
+                        FilterChip(
+                            selected = currentThemeIntensity == level,
+                            onClick = { onSelectAnimationIntensity(level) },
+                            label = { Text(level.label) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = colors.primary,
+                                selectedLabelColor = colors.onPrimary,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
         SettingToggleCard("Reprodução sem intervalos (Gapless)", "Transição contínua entre faixas da fila.", preferences.gaplessEnabled, onSetGapless)
         SettingToggleCard("Economia de animações", "Desativa rotações e efeitos pesados para poupar bateria.", preferences.batterySaverAnimations, onSetBatterySaverAnim)
         SettingToggleCard("Ações extras na notificação", "Exibe botão rápido de Adicionar/Remover Playlist na mídia.", preferences.notificationShowPlaylistButton) {
@@ -502,7 +564,11 @@ fun SettingsScreen(
         }
 
         Spacer(Modifier.height(12.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = colors.card), shape = RoundedCornerShape(18.dp)) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = colors.cardSurfaceColor()),
+            border = colors.borderStroke(),
+            shape = colors.resolveCardShape(),
+        ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Controles Físicos de Fone / Bluetooth", style = MaterialTheme.typography.titleMedium, color = colors.primary)
                 Spacer(Modifier.height(8.dp))
@@ -522,18 +588,6 @@ fun SettingsScreen(
         }
 
         Spacer(Modifier.height(12.dp))
-        SettingActionRow(
-            title = "Estilo visual da reprodução",
-            subtitle = "${preferences.playerVisualStyle.title} • Transições e efeitos de movimento",
-            onClick = { showVisualStyleSheet = true },
-            modifier = Modifier.testTag("settings_visual_style_row"),
-        )
-        SettingActionRow(
-            title = "Fontes e tipografia",
-            subtitle = "Catálogo de fontes • Ativa: $activeFontName",
-            onClick = onOpenFontSettings,
-            modifier = Modifier.testTag("settings_font_row"),
-        )
         SettingActionRow("Formatos de Áudio Compatíveis neste Aparelho", "Ver decodificadores reais (MP3, FLAC, OPUS, DSF...)", { showFormatsDialog = true })
         SettingActionRow("Permissões e Pastas SAF", "Gerenciar acesso ao armazenamento local", onOpenPermissions)
         SettingActionRow("Backup e Restauração", "Exportar/importar JSON e agendar backup", onOpenBackup)
@@ -642,8 +696,9 @@ private fun SettingToggleCard(title: String, subtitle: String, checked: Boolean,
     val colors = LocalMyatoColors.current
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.card),
+        shape = colors.resolveCardShape(),
+        border = colors.borderStroke(),
+        colors = CardDefaults.cardColors(containerColor = colors.cardSurfaceColor()),
     ) {
         Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
@@ -665,15 +720,16 @@ private fun SettingActionRow(
     val colors = LocalMyatoColors.current
     Card(
         modifier = modifier.fillMaxWidth().padding(vertical = 4.dp).clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.card),
+        shape = colors.resolveCardShape(),
+        border = colors.borderStroke(),
+        colors = CardDefaults.cardColors(containerColor = colors.cardSurfaceColor()),
     ) {
         Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
                 Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
             }
-            Icon(Icons.Rounded.Settings, contentDescription = null, tint = colors.primary)
+            Icon(Icons.Rounded.Settings, contentDescription = null, tint = colors.iconPrimary)
         }
     }
 }
@@ -687,7 +743,6 @@ fun AboutScreen(onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("about_screen"),
     ) {
         SimpleHeader(title = "Sobre o MYATO MUSIC", onBack = onBack)
@@ -723,7 +778,7 @@ fun AboutScreen(onBack: () -> Unit) {
                             "• Sem streaming, rastreamento ou anúncios.\n" +
                             "• Motor Media3 / ExoPlayer com reprodução gapless e MediaLibraryService.\n" +
                             "• Banco Room com 16 entidades e backups locais JSON.\n" +
-                            "• Suporte a Android Auto, Widgets em 3 tamanhos, Equalizador real e 12+ temas.",
+                            "• Suporte a Android Auto, Widgets em 3 tamanhos, Equalizador real e 50+ Myato Themes.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.textSecondary,
                     )

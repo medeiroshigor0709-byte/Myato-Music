@@ -106,7 +106,6 @@ fun EqualizerScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("equalizer_screen"),
     ) {
         SimpleHeader(title = "Equalizador de Áudio", onBack = onBack)
@@ -183,7 +182,7 @@ fun EqualizerScreen(
                         },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = colors.primary,
-                            selectedLabelColor = Color.Black,
+                            selectedLabelColor = colors.onPrimary,
                         ),
                     )
                 }
@@ -297,7 +296,7 @@ fun EqualizerScreen(
                 Button(
                     onClick = { showSaveDialog = true },
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                 ) {
                     Icon(Icons.Rounded.Save, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
@@ -369,7 +368,6 @@ fun SleepTimerScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("sleep_timer_screen"),
     ) {
         SimpleHeader(title = "Temporizador de Reprodução", onBack = onBack)
@@ -409,7 +407,7 @@ fun SleepTimerScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Button(
                                 onClick = onPauseResume,
-                                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                             ) {
                                 Icon(if (timerState.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, contentDescription = null)
                                 Spacer(Modifier.width(4.dp))
@@ -461,7 +459,7 @@ fun SleepTimerScreen(
                         )
                         Button(
                             onClick = { onStartClockTime(targetHour, targetMinute) },
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                         ) {
                             Text("Agendar")
                         }
@@ -490,7 +488,7 @@ fun SleepTimerScreen(
                     Button(
                         onClick = { onStartTrackCount(trackCount) },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                     ) {
                         Text("Ativar após $trackCount música(s)", fontWeight = FontWeight.Bold)
                     }

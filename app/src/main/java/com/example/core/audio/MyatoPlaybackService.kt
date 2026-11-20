@@ -215,9 +215,10 @@ class MyatoPlaybackService : MediaLibraryService() {
         // Observe theme changes dynamically to update notification accent color in real time without app restart
         serviceScope.launch {
             preferencesStore.preferencesFlow.collect { prefs ->
-                val builtIn = BuiltInThemes.all.find { it.id == prefs.activeThemeId }
+                val resolvedId = BuiltInThemes.resolveThemeId(prefs.activeThemeId)
+                val builtIn = BuiltInThemes.findByIdOrAlias(resolvedId)
                 val colorHex = builtIn?.primaryColorHex
-                    ?: database.themeDao().getThemeById(prefs.activeThemeId)?.primaryColorHex
+                    ?: database.themeDao().getThemeById(resolvedId)?.primaryColorHex
                     ?: BuiltInThemes.MidnightOrange.primaryColorHex
                 val resolvedColor = colorHex.toInt()
                 if (resolvedColor != currentThemePrimaryColor) {

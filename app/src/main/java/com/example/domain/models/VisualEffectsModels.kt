@@ -66,6 +66,9 @@ data class MotionSettingsState(
 
     val shouldAnimateTabTransitions: Boolean
         get() = isAnimationsActive && !isReducedMotionActive
+
+    val animationIntensityLevel: ThemeAnimationIntensity
+        get() = ThemeAnimationIntensity.fromFactor(effectIntensity, animationsDisabled)
 }
 
 @Immutable

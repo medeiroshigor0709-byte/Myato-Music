@@ -455,10 +455,11 @@ fun MiniPlayerBar(
             .padding(horizontal = 10.dp, vertical = 6.dp)
             .testTag("mini_player_bar")
             .clickable(onClick = onOpenPlayer),
-        shape = RoundedCornerShape(18.dp),
-        color = colors.card,
-        tonalElevation = 6.dp,
-        shadowElevation = 8.dp,
+        shape = colors.resolveCardShape(),
+        color = colors.cardSurfaceColor(),
+        border = colors.borderStroke(),
+        tonalElevation = colors.elevationDp(4.dp),
+        shadowElevation = colors.elevationDp(6.dp),
     ) {
         Column {
             Row(
@@ -495,12 +496,12 @@ fun MiniPlayerBar(
                         .size(48.dp)
                         .pressScaleFeedback(playInteraction, pressedScale = 0.92f)
                         .testTag("mini_player_play_pause")
-                        .clip(CircleShape)
-                        .background(colors.primary),
+                        .clip(colors.resolveButtonShape())
+                        .background(colors.buttonContainer),
                 ) {
                     AnimatedPlayPauseIcon(
                         isPlaying = isPlaying,
-                        tint = if (colors.isLight) Color.White else Color.Black,
+                        tint = colors.buttonContent,
                         iconSize = 24.dp,
                     )
                 }
@@ -990,7 +991,7 @@ fun CreateArtistPlaylistDialog(
                     onConfirm(clean, includeCollabs, autoUpdate)
                     onDismiss()
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
                 modifier = Modifier.testTag("confirm_create_artist_playlist_button"),
             ) {
                 Text("Criar (${matchingTracks.size})", fontWeight = FontWeight.Bold)
@@ -1131,7 +1132,7 @@ fun AddToPlaylistsDialog(
                             label = { Text(opt.label) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = colors.primary,
-                                selectedLabelColor = Color.Black,
+                                selectedLabelColor = colors.onPrimary,
                             ),
                         )
                     }
@@ -1186,7 +1187,7 @@ fun AddToPlaylistsDialog(
                                         },
                                         colors = CheckboxDefaults.colors(
                                             checkedColor = colors.primary,
-                                            checkmarkColor = Color.Black,
+                                            checkmarkColor = colors.onPrimary,
                                         ),
                                     )
                                     Spacer(Modifier.width(8.dp))
@@ -1243,7 +1244,7 @@ fun AddToPlaylistsDialog(
                     Checkbox(
                         checked = allowDuplicates,
                         onCheckedChange = { allowDuplicates = it },
-                        colors = CheckboxDefaults.colors(checkedColor = colors.primary, checkmarkColor = Color.Black),
+                        colors = CheckboxDefaults.colors(checkedColor = colors.primary, checkmarkColor = colors.onPrimary),
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(

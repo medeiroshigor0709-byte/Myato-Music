@@ -124,7 +124,6 @@ fun LyricsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("lyrics_screen"),
     ) {
         SimpleHeader(title = track?.title ?: "Letras", onBack = onBack)
@@ -157,7 +156,7 @@ fun LyricsScreen(
                         Spacer(Modifier.height(12.dp))
                         Button(
                             onClick = { selectedTab = 1 },
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                         ) {
                             Icon(Icons.Rounded.Edit, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
@@ -252,7 +251,7 @@ fun LyricsScreen(
                                 syncCursor = (syncCursor + 1).coerceAtMost(lines.lastIndex)
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                     ) {
                         Icon(Icons.Rounded.Timer, contentDescription = null)
                         Spacer(Modifier.width(4.dp))
@@ -272,7 +271,7 @@ fun LyricsScreen(
                 Button(
                     onClick = { onSaveLyrics(track, rawText) },
                     modifier = Modifier.fillMaxWidth().height(50.dp).testTag("save_lyrics_button"),
-                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
                 ) {
                     Icon(Icons.Rounded.Save, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
@@ -343,7 +342,6 @@ fun TagEditorScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
             .testTag("tag_editor_screen"),
     ) {
         SimpleHeader(
@@ -426,7 +424,7 @@ fun TagEditorScreen(
             Button(
                 onClick = { showPreviewDialog = true },
                 modifier = Modifier.fillMaxWidth().height(52.dp).testTag("preview_tags_button"),
-                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = Color.Black),
+                colors = ButtonDefaults.buttonColors(containerColor = colors.buttonContainer, contentColor = colors.buttonContent),
             ) {
                 Icon(Icons.Rounded.Preview, contentDescription = null)
                 Spacer(Modifier.width(8.dp))

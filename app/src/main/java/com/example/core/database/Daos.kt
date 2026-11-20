@@ -335,8 +335,14 @@ interface ThemeDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTheme(theme: ThemeEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertThemes(themes: List<ThemeEntity>)
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMissingBuiltInThemes(themes: List<ThemeEntity>)
+
+    @Query("DELETE FROM themes WHERE isBuiltIn = 1 AND id NOT IN (:validIds)")
+    suspend fun deleteObsoleteBuiltInThemes(validIds: List<String>)
 
     @Query("DELETE FROM themes WHERE id = :id AND isBuiltIn = 0")
     suspend fun deleteCustomTheme(id: String)
